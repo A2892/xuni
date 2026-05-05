@@ -1,0 +1,31 @@
+export const sharedCurrencies = [
+  { code: 'CNY', name: 'Chinese Yuan', nameCn: '人民币', symbol: '¥', flag: '🇨🇳' },
+  { code: 'USD', name: 'US Dollar', nameCn: '美元', symbol: '$', flag: '🇺🇸' },
+  { code: 'EUR', name: 'Euro', nameCn: '欧元', symbol: '€', flag: '🇪🇺' },
+  { code: 'GBP', name: 'British Pound', nameCn: '英镑', symbol: '£', flag: '🇬🇧' },
+  { code: 'JPY', name: 'Japanese Yen', nameCn: '日元', symbol: '¥', flag: '🇯🇵' },
+  { code: 'HKD', name: 'Hong Kong Dollar', nameCn: '港币', symbol: 'HK$', flag: '🇭🇰' },
+  { code: 'TWD', name: 'Taiwan Dollar', nameCn: '新台币', symbol: 'NT$', flag: '🇹🇼' },
+  { code: 'SGD', name: 'Singapore Dollar', nameCn: '新加坡元', symbol: 'S$', flag: '🇸🇬' },
+  { code: 'AUD', name: 'Australian Dollar', nameCn: '澳元', symbol: 'A$', flag: '🇦🇺' },
+  { code: 'CAD', name: 'Canadian Dollar', nameCn: '加元', symbol: 'C$', flag: '🇨🇦' },
+  { code: 'KRW', name: 'Korean Won', nameCn: '韩元', symbol: '₩', flag: '🇰🇷' },
+  { code: 'THB', name: 'Thai Baht', nameCn: '泰铢', symbol: '฿', flag: '🇹🇭' },
+  { code: 'MYR', name: 'Malaysian Ringgit', nameCn: '马来西亚林吉特', symbol: 'RM', flag: '🇲🇾' },
+  { code: 'CHF', name: 'Swiss Franc', nameCn: '瑞士法郎', symbol: 'CHF', flag: '🇨🇭' },
+  { code: 'INR', name: 'Indian Rupee', nameCn: '印度卢比', symbol: '₹', flag: '🇮🇳' },
+  { code: 'AED', name: 'UAE Dirham', nameCn: '阿联酋迪拉姆', symbol: 'د.إ', flag: '🇦🇪' },
+  { code: 'RUB', name: 'Russian Ruble', nameCn: '俄罗斯卢布', symbol: '₽', flag: '🇷🇺' },
+  { code: 'BRL', name: 'Brazilian Real', nameCn: '巴西雷亚尔', symbol: 'R$', flag: '🇧🇷' },
+  { code: 'MXN', name: 'Mexican Peso', nameCn: '墨西哥比索', symbol: 'MX$', flag: '🇲🇽' },
+  { code: 'PHP', name: 'Philippine Peso', nameCn: '菲律宾比索', symbol: '₱', flag: '🇵🇭' },
+  { code: 'NZD', name: 'New Zealand Dollar', nameCn: '新西兰元', symbol: 'NZ$', flag: '🇳🇿' },
+  { code: 'SEK', name: 'Swedish Krona', nameCn: '瑞典克朗', symbol: 'kr', flag: '🇸🇪' },
+  { code: 'NOK', name: 'Norwegian Krone', nameCn: '挪威克朗', symbol: 'kr', flag: '🇳🇴' },
+  { code: 'DKK', name: 'Danish Krone', nameCn: '丹麦克朗', symbol: 'kr', flag: '🇩🇰' },
+  { code: 'PLN', name: 'Polish Zloty', nameCn: '波兰兹罗提', symbol: 'zł', flag: '🇵🇱' },
+  { code: 'ZAR', name: 'South African Rand', nameCn: '南非兰特', symbol: 'R', flag: '🇿🇦' },
+  { code: 'TRY', name: 'Turkish Lira', nameCn: '土耳其里拉', symbol: '₺', flag: '🇹🇷' }
+]
+
+export default sharedCurrencies

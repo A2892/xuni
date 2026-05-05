@@ -1,0 +1,10 @@
+[
+  {
+    "id": "local-admin-1",
+    "username": "admin",
+    "password": "2362947129",
+    "full_name": "本地管理员",
+    "role": "admin",
+    "status": "active"
+  }
+]

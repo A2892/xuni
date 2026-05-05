@@ -1,0 +1,19 @@
+@import './base.css';
+
+/* 全局样式已移至 App.vue */
+
+/* Bank Card Brands */
+.brand-visa { color: #1a1f71; font-weight: 800; font-style: italic; }
+.brand-mastercard { color: #eb001b; font-weight: 800; }
+.brand-amex { color: #2e77bc; font-weight: 800; }
+.brand-discover { color: #ff6000; font-weight: 800; }
+.brand-unionpay { color: #00a4e0; font-weight: 800; }
+.brand-jcb { color: #0f4c81; font-weight: 800; }
+.brand-diners { color: #0079be; font-weight: 800; }
+
+/* Common Card Styles */
+.card-brand {
+  font-size: 16px;
+  margin-bottom: 4px;
+  display: inline-block;
+}

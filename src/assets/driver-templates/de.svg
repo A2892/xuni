@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="520" viewBox="0 0 800 520">
+  <rect width="800" height="520" fill="#f6fff7"/>
+  <rect x="20" y="20" width="760" height="120" rx="8" fill="#f4b400"/>
+  <text x="40" y="84" fill="#111" font-size="36" font-family="Arial">GERMANY</text>
+  <text x="40" y="120" fill="#111" font-size="18" font-family="Arial">Führerschein (Beispiel)</text>
+</svg>

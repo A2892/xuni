@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="520" viewBox="0 0 800 520">
+  <rect width="800" height="520" fill="#fff6f2"/>
+  <rect x="20" y="20" width="760" height="120" rx="8" fill="#c62828"/>
+  <text x="40" y="84" fill="#fff" font-size="36" font-family="Arial">UNITED KINGDOM</text>
+  <text x="40" y="120" fill="#fff" font-size="18" font-family="Arial">Driver Licence (Sample)</text>
+</svg>
