@@ -1,10 +1,16 @@
 {
   "buildCommand": "npm run build:vercel",
   "outputDirectory": "dist",
+  "functions": {
+    "api/handler.js": {
+      "memory": 3008,
+      "maxDuration": 60
+    }
+  },
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "/api/index.js"
+      "source": "/api/(.*)",
+      "destination": "/api/handler.js"
     },
     {
       "source": "/(.*)",

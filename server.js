@@ -18,22 +18,9 @@ import { Readable } from 'stream'
 
 dotenv.config()
 
-// 在 Netlify Functions 环境中，__filename 会自动提供
-// 我们只在需要时安全地声明它
-let __filename, __dirname
-try {
-  if (!globalThis.__filename) {
-    __filename = fileURLToPath(import.meta.url)
-    __dirname = dirname(__filename)
-  } else {
-    __filename = globalThis.__filename  
-    __dirname = globalThis.__dirname
-  }
-} catch (e) {
-  // 如果上面都失败，使用备用方案
-  __filename = import.meta.url
-  __dirname = '.'
-}
+// 安全地处理 __filename 和 __dirname，适配多种环境（Node、Netlify、Vercel）
+let __filename = globalThis.__filename || fileURLToPath(import.meta.url)
+let __dirname = globalThis.__dirname || dirname(__filename)
 
 const app = express()
 const { Pool } = pg
