@@ -151,15 +151,6 @@
               class="form-input"
             />
           </div>
-          <div class="form-group">
-            <label>邮箱</label>
-            <input
-              v-model="editingAdmin.email"
-              type="email"
-              placeholder="请输入邮箱（可选）"
-              class="form-input"
-            />
-          </div>
         </div>
         <div class="modal-footer">
           <button class="cancel-btn" @click="closeEditDialog">取消</button>
@@ -233,7 +224,13 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { supabase } from '@/lib/supabase'
+import {
+  getAllAdminUsers,
+  createAdminUser,
+  updateAdminUser,
+  updateAdminPassword,
+  deleteAdminUser
+} from '@/utils/cockroachdbService'
 import { useAuthStore } from '@/stores/auth'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
@@ -264,8 +261,7 @@ const newAdmin = ref({
 const editingAdmin = ref({
   id: '',
   username: '',
-  full_name: '',
-  email: ''
+  full_name: ''
 })
 const passwordAdmin = ref({
   id: '',
@@ -289,19 +285,9 @@ const filteredAdmins = computed(() => {
 // 加载管理员列表
 const loadAdmins = async () => {
   try {
-    if (!supabase) {
-      console.error('Supabase未配置')
-      return
-    }
-
-    const { data, error } = await supabase
-      .from('admin_users')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    if (error) throw error
-
-    admins.value = data || []
+    const result = await getAllAdminUsers()
+    if (result.error) throw new Error(result.error)
+    admins.value = result.data || []
   } catch (error) {
     console.error('加载管理员列表失败:', error)
     alert('加载管理员列表失败，请重试')
@@ -316,27 +302,19 @@ const createAdmin = async () => {
   }
 
   try {
-    if (!supabase) {
-      alert('Supabase未配置')
-      return
-    }
+    const result = await createAdminUser({
+      username: newAdmin.value.username,
+      password: newAdmin.value.password,
+      full_name: newAdmin.value.full_name || null,
+      role: 'admin',
+      status: 'active'
+    })
 
-    const { data, error } = await supabase
-      .from('admin_users')
-      .insert({
-        username: newAdmin.value.username,
-        password: newAdmin.value.password,
-        full_name: newAdmin.value.full_name || null,
-        role: 'admin',
-        status: 'active'
-      })
-      .select()
-
-    if (error) {
-      if (error.code === '23505') {
+    if (result.error) {
+      if (result.error.includes('已存在')) {
         alert('用户名已存在')
       } else {
-        throw error
+        throw new Error(result.error)
       }
       return
     }
@@ -366,17 +344,8 @@ const handleDeleteConfirmed = () => {
 
 const deleteAdmin = async (id: string) => {
   try {
-    if (!supabase) {
-      alert('Supabase未配置')
-      return
-    }
-
-    const { error } = await supabase
-      .from('admin_users')
-      .delete()
-      .eq('id', id)
-
-    if (error) throw error
+    const result = await deleteAdminUser(id)
+    if (result.error) throw new Error(result.error)
 
     alert('✅ 管理员账号已删除')
     await loadAdmins()
@@ -401,8 +370,7 @@ const showEditDialog = (admin: AdminUser) => {
   editingAdmin.value = {
     id: admin.id,
     username: admin.username,
-    full_name: admin.full_name || '',
-    email: (admin as any).email || ''
+    full_name: admin.full_name || ''
   }
   showEditDialogFlag.value = true
 }
@@ -413,28 +381,18 @@ const closeEditDialog = () => {
   editingAdmin.value = {
     id: '',
     username: '',
-    full_name: '',
-    email: ''
+    full_name: ''
   }
 }
 
 // 更新管理员信息
 const updateAdmin = async () => {
   try {
-    if (!supabase) {
-      alert('Supabase未配置')
-      return
-    }
+    const result = await updateAdminUser(editingAdmin.value.id, {
+      full_name: editingAdmin.value.full_name || null
+    })
 
-    const { error } = await supabase
-      .from('admin_users')
-      .update({
-        full_name: editingAdmin.value.full_name || null,
-        email: editingAdmin.value.email || null
-      })
-      .eq('id', editingAdmin.value.id)
-
-    if (error) throw error
+    if (result.error) throw new Error(result.error)
 
     alert('✅ 账号信息更新成功！')
     closeEditDialog()
@@ -492,19 +450,12 @@ const updatePassword = async () => {
   }
 
   try {
-    if (!supabase) {
-      alert('Supabase未配置')
-      return
-    }
+    const result = await updateAdminPassword(
+      passwordAdmin.value.id,
+      passwordForm.value.newPassword
+    )
 
-    const { error } = await supabase
-      .from('admin_users')
-      .update({
-        password: passwordForm.value.newPassword
-      })
-      .eq('id', passwordAdmin.value.id)
-
-    if (error) throw error
+    if (result.error) throw new Error(result.error)
 
     alert('✅ 密码修改成功！')
     closePasswordDialog()

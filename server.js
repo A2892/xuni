@@ -7,6 +7,7 @@ import express from 'express'
 import cors from 'cors'
 import pg from 'pg'
 import dotenv from 'dotenv'
+import bcrypt from 'bcryptjs'
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { mkdirSync, existsSync, readFileSync } from 'fs'
@@ -220,6 +221,66 @@ function jsonError(res, status, message) {
   return res.status(status).json({ success: false, data: null, error: message })
 }
 
+function isBcryptHash(value) {
+  return typeof value === 'string' && /^\$2[aby]\$/.test(value)
+}
+
+async function hashAdminPassword(plain) {
+  return bcrypt.hash(plain, ADMIN_PASSWORD_HASH_ROUNDS)
+}
+
+async function ensureAdminSeed() {
+  if (!ADMIN_SEED_USERNAME || !ADMIN_SEED_PASSWORD) {
+    return
+  }
+
+  try {
+    const tableCheck = await executeQuery(
+      "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'admin_users' LIMIT 1"
+    )
+
+    if (!tableCheck.success) {
+      console.warn('⚠️ 管理员种子检查失败:', tableCheck.error)
+      return
+    }
+
+    if (!tableCheck.data?.length) {
+      console.warn('⚠️ 未找到 admin_users 表，跳过管理员种子创建')
+      return
+    }
+
+    const existing = await executeQuery(
+      'SELECT id FROM admin_users WHERE username = $1 LIMIT 1',
+      [ADMIN_SEED_USERNAME]
+    )
+
+    if (!existing.success) {
+      console.warn('⚠️ 管理员种子查询失败:', existing.error)
+      return
+    }
+
+    if (existing.data?.length) {
+      console.log('ℹ️ 管理员账号已存在，跳过种子创建')
+      return
+    }
+
+    const hashedPassword = await hashAdminPassword(ADMIN_SEED_PASSWORD)
+
+    const result = await executeQuery(
+      'INSERT INTO admin_users (username, password, full_name, role, status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [ADMIN_SEED_USERNAME, hashedPassword, ADMIN_SEED_FULL_NAME || null, ADMIN_SEED_ROLE, ADMIN_SEED_STATUS]
+    )
+
+    if (result.success && result.data?.length) {
+      console.log(`✅ 已创建初始管理员账号: ${ADMIN_SEED_USERNAME}`)
+    } else {
+      console.warn('⚠️ 初始管理员创建失败:', result.error || '未知错误')
+    }
+  } catch (error) {
+    console.warn('⚠️ 初始管理员创建异常:', error.message || error)
+  }
+}
+
 // ==================== 安全：白名单表 ====================
 const ALLOWED_TABLES = [
   'student_profiles', 'student_media', 'student_documents',
@@ -258,33 +319,91 @@ const R2_BUCKET = String(process.env.R2_BUCKET || '').trim()
 const R2_ENDPOINT = String(process.env.R2_ENDPOINT || '').trim().replace(/\/+$/, '')
 const R2_PUBLIC_BASE_URL = String(process.env.R2_PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '')
 const R2_SIGNED_URL_EXPIRES_SECONDS = parseSafeInteger(process.env.R2_SIGNED_URL_EXPIRES_SECONDS, 900)
+const R2_NEW_ACCOUNT_ID = String(process.env.R2_NEW_ACCOUNT_ID || '').trim()
+const R2_NEW_ACCESS_KEY_ID = String(process.env.R2_NEW_ACCESS_KEY_ID || '').trim()
+const R2_NEW_SECRET_ACCESS_KEY = String(process.env.R2_NEW_SECRET_ACCESS_KEY || '').trim()
+const R2_NEW_BUCKET = String(process.env.R2_NEW_BUCKET || '').trim()
+const R2_NEW_ENDPOINT = String(process.env.R2_NEW_ENDPOINT || '').trim().replace(/\/+$/, '')
+const R2_NEW_PUBLIC_BASE_URL = String(process.env.R2_NEW_PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '')
+const R2_NEW_SIGNED_URL_EXPIRES_SECONDS = parseSafeInteger(
+  process.env.R2_NEW_SIGNED_URL_EXPIRES_SECONDS,
+  R2_SIGNED_URL_EXPIRES_SECONDS
+)
+const R2_NEW_OBJECT_KEY_PREFIX = normalizeR2KeyPrefix(process.env.R2_NEW_OBJECT_KEY_PREFIX || 'r2v2')
+const ADMIN_SEED_USERNAME = String(process.env.ADMIN_SEED_USERNAME || '').trim()
+const ADMIN_SEED_PASSWORD = String(process.env.ADMIN_SEED_PASSWORD || '').trim()
+const ADMIN_SEED_FULL_NAME = String(process.env.ADMIN_SEED_FULL_NAME || '').trim()
+const ADMIN_SEED_ROLE = String(process.env.ADMIN_SEED_ROLE || 'admin').trim() || 'admin'
+const ADMIN_SEED_STATUS = String(process.env.ADMIN_SEED_STATUS || 'active').trim() || 'active'
+const ADMIN_PASSWORD_HASH_ROUNDS = Math.min(
+  Math.max(parseSafeInteger(process.env.ADMIN_PASSWORD_HASH_ROUNDS, 10), 8),
+  14
+)
 
-let r2Client = null
-
-function isR2Configured() {
-  return Boolean(R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_BUCKET && R2_ENDPOINT)
+const R2_LEGACY_CONFIG = {
+  accountId: R2_ACCOUNT_ID,
+  accessKeyId: R2_ACCESS_KEY_ID,
+  secretAccessKey: R2_SECRET_ACCESS_KEY,
+  bucket: R2_BUCKET,
+  endpoint: R2_ENDPOINT,
+  publicBaseUrl: R2_PUBLIC_BASE_URL,
+  signedUrlExpiresSeconds: R2_SIGNED_URL_EXPIRES_SECONDS
 }
 
-function getR2Client() {
-  if (!isR2Configured()) return null
-  if (!r2Client) {
-    r2Client = new S3Client({
+const R2_NEW_CONFIG = {
+  accountId: R2_NEW_ACCOUNT_ID,
+  accessKeyId: R2_NEW_ACCESS_KEY_ID,
+  secretAccessKey: R2_NEW_SECRET_ACCESS_KEY,
+  bucket: R2_NEW_BUCKET,
+  endpoint: R2_NEW_ENDPOINT,
+  publicBaseUrl: R2_NEW_PUBLIC_BASE_URL,
+  signedUrlExpiresSeconds: R2_NEW_SIGNED_URL_EXPIRES_SECONDS
+}
+
+const r2Clients = new Map()
+
+function isR2Configured(config) {
+  return Boolean(
+    config &&
+      config.accountId &&
+      config.accessKeyId &&
+      config.secretAccessKey &&
+      config.bucket &&
+      config.endpoint
+  )
+}
+
+function getR2Client(config) {
+  if (!isR2Configured(config)) return null
+  const cacheKey = `${config.endpoint}|${config.bucket}|${config.accessKeyId}`
+  if (!r2Clients.has(cacheKey)) {
+    r2Clients.set(cacheKey, new S3Client({
       region: 'auto',
-      endpoint: R2_ENDPOINT,
+      endpoint: config.endpoint,
       forcePathStyle: true,
       credentials: {
-        accessKeyId: R2_ACCESS_KEY_ID,
-        secretAccessKey: R2_SECRET_ACCESS_KEY
+        accessKeyId: config.accessKeyId,
+        secretAccessKey: config.secretAccessKey
       }
-    })
+    }))
   }
-  return r2Client
+  return r2Clients.get(cacheKey)
 }
 
 function normalizeUploadFilename(input) {
   const name = String(input || '').trim()
   if (!name) return ''
   return name.replace(/[^a-zA-Z0-9._\-()]/g, '_').slice(-160)
+}
+
+function normalizeR2KeyPrefix(input) {
+  const raw = String(input || '').trim()
+  if (!raw) return ''
+  const normalized = raw.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '')
+  if (!normalized) return ''
+  if (normalized.includes('..') || normalized.includes('//')) return ''
+  if (!SAFE_STORAGE_PATH_PATTERN.test(`${normalized}/`)) return ''
+  return `${normalized}/`
 }
 
 function normalizeR2ObjectKey(input) {
@@ -295,11 +414,46 @@ function normalizeR2ObjectKey(input) {
   return key
 }
 
-function buildR2PublicUrl(objectKey) {
+function buildR2PublicUrl(objectKey, config = R2_LEGACY_CONFIG) {
   const normalizedKey = normalizeR2ObjectKey(objectKey)
-  if (!normalizedKey) return ''
-  if (R2_PUBLIC_BASE_URL) return `${R2_PUBLIC_BASE_URL}/${normalizedKey}`
-  return `${R2_ENDPOINT}/${R2_BUCKET}/${normalizedKey}`
+  if (!normalizedKey || !config) return ''
+  if (config.publicBaseUrl) return `${config.publicBaseUrl}/${normalizedKey}`
+  if (!config.endpoint || !config.bucket) return ''
+  return `${config.endpoint}/${config.bucket}/${normalizedKey}`
+}
+
+function resolveR2UploadConfig() {
+  const hasNew = isR2Configured(R2_NEW_CONFIG)
+  const hasLegacy = isR2Configured(R2_LEGACY_CONFIG)
+  if (hasNew) {
+    if (hasLegacy && !R2_NEW_OBJECT_KEY_PREFIX) {
+      return { config: null, useNewPrefix: false, error: 'R2_NEW_OBJECT_KEY_PREFIX 不能为空' }
+    }
+    return { config: R2_NEW_CONFIG, useNewPrefix: Boolean(R2_NEW_OBJECT_KEY_PREFIX), error: null }
+  }
+  if (hasLegacy) {
+    return { config: R2_LEGACY_CONFIG, useNewPrefix: false, error: null }
+  }
+  return { config: null, useNewPrefix: false, error: 'R2 未配置' }
+}
+
+function resolveR2ConfigForObjectKey(objectKey) {
+  const normalizedKey = normalizeR2ObjectKey(objectKey)
+  if (!normalizedKey) return { config: null, objectKey: '' }
+
+  if (isR2Configured(R2_NEW_CONFIG) && R2_NEW_OBJECT_KEY_PREFIX && normalizedKey.startsWith(R2_NEW_OBJECT_KEY_PREFIX)) {
+    return { config: R2_NEW_CONFIG, objectKey: normalizedKey }
+  }
+
+  if (isR2Configured(R2_LEGACY_CONFIG)) {
+    return { config: R2_LEGACY_CONFIG, objectKey: normalizedKey }
+  }
+
+  if (isR2Configured(R2_NEW_CONFIG)) {
+    return { config: R2_NEW_CONFIG, objectKey: normalizedKey }
+  }
+
+  return { config: null, objectKey: normalizedKey }
 }
 
 function normalizeStoragePath(input) {
@@ -1142,8 +1296,10 @@ app.post('/api/cloudinary/delete', async (req, res) => {
  * Body: { fileName: string, contentType?: string, mediaType?: 'photo'|'video' }
  */
 app.post('/api/r2/presign-upload', async (req, res) => {
-  if (!isR2Configured()) {
-    return jsonError(res, 503, 'R2 未配置（缺少 R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET / R2_ENDPOINT）')
+  const uploadConfigResult = resolveR2UploadConfig()
+  if (!uploadConfigResult.config) {
+    const statusCode = uploadConfigResult.error === 'R2_NEW_OBJECT_KEY_PREFIX 不能为空' ? 400 : 503
+    return jsonError(res, statusCode, uploadConfigResult.error || 'R2 未配置（请设置 R2_NEW_* 或 R2_*）')
   }
 
   const fileName = normalizeUploadFilename(req.body?.fileName)
@@ -1164,23 +1320,27 @@ app.post('/api/r2/presign-upload', async (req, res) => {
   }
 
   try {
-    const client = getR2Client()
+    const uploadConfig = uploadConfigResult.config
+    const client = getR2Client(uploadConfig)
     if (!client) {
       return jsonError(res, 503, 'R2 客户端初始化失败')
     }
 
     const prefix = mediaType === 'photo' ? 'photos' : 'videos'
-    const objectKey = `${prefix}/${Date.now()}_${randomUUID().slice(0, 8)}_${fileName}`
+    const baseKey = `${prefix}/${Date.now()}_${randomUUID().slice(0, 8)}_${fileName}`
+    const objectKey = uploadConfigResult.useNewPrefix && R2_NEW_OBJECT_KEY_PREFIX
+      ? `${R2_NEW_OBJECT_KEY_PREFIX}${baseKey}`
+      : baseKey
 
     const command = new PutObjectCommand({
-      Bucket: R2_BUCKET,
+      Bucket: uploadConfig.bucket,
       Key: objectKey,
       ContentType: contentType,
       ...(fileSize > 0 ? { ContentLength: fileSize } : {})
     })
 
     const uploadUrl = await getSignedUrl(client, command, {
-      expiresIn: R2_SIGNED_URL_EXPIRES_SECONDS
+      expiresIn: uploadConfig.signedUrlExpiresSeconds
     })
 
     return res.json({
@@ -1188,8 +1348,8 @@ app.post('/api/r2/presign-upload', async (req, res) => {
       data: {
         uploadUrl,
         objectKey,
-        publicUrl: buildR2PublicUrl(objectKey),
-        expiresIn: R2_SIGNED_URL_EXPIRES_SECONDS
+        publicUrl: buildR2PublicUrl(objectKey, uploadConfig),
+        expiresIn: uploadConfig.signedUrlExpiresSeconds
       },
       error: null
     })
@@ -1204,36 +1364,35 @@ app.post('/api/r2/presign-upload', async (req, res) => {
  * Body: { objectKey: string }
  */
 app.post('/api/r2/presign-read', async (req, res) => {
-  if (!isR2Configured()) {
-    return jsonError(res, 503, 'R2 未配置（缺少 R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET / R2_ENDPOINT）')
-  }
-
-  const objectKey = normalizeR2ObjectKey(req.body?.objectKey)
-  if (!objectKey) {
+  const resolved = resolveR2ConfigForObjectKey(req.body?.objectKey)
+  if (!resolved.objectKey) {
     return jsonError(res, 400, 'objectKey 无效')
+  }
+  if (!resolved.config) {
+    return jsonError(res, 503, 'R2 未配置（请设置 R2_NEW_* 或 R2_*）')
   }
 
   try {
-    const client = getR2Client()
+    const client = getR2Client(resolved.config)
     if (!client) {
       return jsonError(res, 503, 'R2 客户端初始化失败')
     }
 
     const command = new GetObjectCommand({
-      Bucket: R2_BUCKET,
-      Key: objectKey
+      Bucket: resolved.config.bucket,
+      Key: resolved.objectKey
     })
 
     const signedUrl = await getSignedUrl(client, command, {
-      expiresIn: R2_SIGNED_URL_EXPIRES_SECONDS
+      expiresIn: resolved.config.signedUrlExpiresSeconds
     })
 
     return res.json({
       success: true,
       data: {
-        objectKey,
+        objectKey: resolved.objectKey,
         signedUrl,
-        expiresIn: R2_SIGNED_URL_EXPIRES_SECONDS
+        expiresIn: resolved.config.signedUrlExpiresSeconds
       },
       error: null
     })
@@ -1247,25 +1406,24 @@ app.post('/api/r2/presign-read', async (req, res) => {
  * GET /api/r2/stream?objectKey=...
  */
 app.get('/api/r2/stream', async (req, res) => {
-  if (!isR2Configured()) {
-    return jsonError(res, 503, 'R2 未配置（缺少 R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET / R2_ENDPOINT）')
-  }
-
-  const objectKey = normalizeR2ObjectKey(req.query?.objectKey)
-  if (!objectKey) {
+  const resolved = resolveR2ConfigForObjectKey(req.query?.objectKey)
+  if (!resolved.objectKey) {
     return jsonError(res, 400, 'objectKey 无效')
+  }
+  if (!resolved.config) {
+    return jsonError(res, 503, 'R2 未配置（请设置 R2_NEW_* 或 R2_*）')
   }
 
   try {
-    const client = getR2Client()
+    const client = getR2Client(resolved.config)
     if (!client) {
       return jsonError(res, 503, 'R2 客户端初始化失败')
     }
 
     const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range.trim() : ''
     const command = new GetObjectCommand({
-      Bucket: R2_BUCKET,
-      Key: objectKey,
+      Bucket: resolved.config.bucket,
+      Key: resolved.objectKey,
       ...(rangeHeader ? { Range: rangeHeader } : {})
     })
 
@@ -1332,29 +1490,28 @@ app.get('/api/r2/stream', async (req, res) => {
  * Body: { objectKey: string }
  */
 app.post('/api/r2/delete', async (req, res) => {
-  if (!isR2Configured()) {
-    return jsonError(res, 503, 'R2 未配置（缺少 R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET / R2_ENDPOINT）')
-  }
-
-  const objectKey = normalizeR2ObjectKey(req.body?.objectKey)
-  if (!objectKey) {
+  const resolved = resolveR2ConfigForObjectKey(req.body?.objectKey)
+  if (!resolved.objectKey) {
     return jsonError(res, 400, 'objectKey 无效')
+  }
+  if (!resolved.config) {
+    return jsonError(res, 503, 'R2 未配置（请设置 R2_NEW_* 或 R2_*）')
   }
 
   try {
-    const client = getR2Client()
+    const client = getR2Client(resolved.config)
     if (!client) {
       return jsonError(res, 503, 'R2 客户端初始化失败')
     }
 
     await client.send(new DeleteObjectCommand({
-      Bucket: R2_BUCKET,
-      Key: objectKey
+      Bucket: resolved.config.bucket,
+      Key: resolved.objectKey
     }))
 
     return res.json({
       success: true,
-      data: { objectKey, deleted: true },
+      data: { objectKey: resolved.objectKey, deleted: true },
       error: null
     })
   } catch (error) {
@@ -1368,23 +1525,22 @@ app.post('/api/r2/delete', async (req, res) => {
  * Body: { objectKey: string }
  */
 app.post('/api/r2/public-url', async (req, res) => {
-  if (!isR2Configured()) {
-    return jsonError(res, 503, 'R2 未配置（缺少 R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET / R2_ENDPOINT）')
-  }
-
-  const objectKey = normalizeR2ObjectKey(req.body?.objectKey)
-  if (!objectKey) {
+  const resolved = resolveR2ConfigForObjectKey(req.body?.objectKey)
+  if (!resolved.objectKey) {
     return jsonError(res, 400, 'objectKey 无效')
   }
+  if (!resolved.config) {
+    return jsonError(res, 503, 'R2 未配置（请设置 R2_NEW_* 或 R2_*）')
+  }
 
-  const publicUrl = buildR2PublicUrl(objectKey)
+  const publicUrl = buildR2PublicUrl(resolved.objectKey, resolved.config)
   if (!publicUrl) {
     return jsonError(res, 500, '无法生成 R2 公共 URL')
   }
 
   return res.json({
     success: true,
-    data: { objectKey, publicUrl },
+    data: { objectKey: resolved.objectKey, publicUrl },
     error: null
   })
 })
@@ -1640,10 +1796,161 @@ app.post('/api/storage/admin/cleanup-unreferenced-files', requireStorageAdminTok
   }
 })
 
+// ==================== 管理员用户管理 API ====================
+
+app.get('/api/admin/users', async (req, res) => {
+  const result = await executeQuery(
+    'SELECT id, username, full_name, role, status, created_at, updated_at FROM admin_users ORDER BY created_at DESC'
+  )
+
+  if (!result.success) {
+    return jsonError(res, 500, result.error || '获取管理员列表失败')
+  }
+
+  return res.json({ success: true, data: result.data || [], error: null })
+})
+
+app.post('/api/admin/users', writeLimiter, async (req, res) => {
+  const username = String(req.body?.username || '').trim()
+  const password = String(req.body?.password || '').trim()
+  const fullName = String(req.body?.full_name || '').trim()
+  const role = String(req.body?.role || 'admin').trim() || 'admin'
+  const status = String(req.body?.status || 'active').trim() || 'active'
+
+  if (!username || !password) {
+    return jsonError(res, 400, '用户名和密码不能为空')
+  }
+
+  const existing = await executeQuery(
+    'SELECT id FROM admin_users WHERE username = $1 LIMIT 1',
+    [username]
+  )
+
+  if (!existing.success) {
+    return jsonError(res, 500, existing.error || '查询管理员失败')
+  }
+
+  if (existing.success && existing.data?.length) {
+    return jsonError(res, 409, '用户名已存在')
+  }
+
+  let hashedPassword
+  try {
+    hashedPassword = await hashAdminPassword(password)
+  } catch (error) {
+    return jsonError(res, 500, '密码加密失败')
+  }
+
+  const result = await executeQuery(
+    'INSERT INTO admin_users (username, password, full_name, role, status) VALUES ($1, $2, $3, $4, $5) RETURNING id, username, full_name, role, status, created_at, updated_at',
+    [username, hashedPassword, fullName || null, role, status]
+  )
+
+  if (!result.success) {
+    return jsonError(res, 500, result.error || '创建管理员失败')
+  }
+
+  return res.json({ success: true, data: result.data?.[0] || null, error: null })
+})
+
+app.put('/api/admin/users/:id', writeLimiter, async (req, res) => {
+  const { id } = req.params
+  const updates = []
+  const params = []
+  let paramIndex = 1
+
+  if (req.body?.full_name !== undefined) {
+    updates.push(`full_name = $${paramIndex}`)
+    params.push(String(req.body.full_name || '').trim() || null)
+    paramIndex += 1
+  }
+
+  if (req.body?.role !== undefined) {
+    updates.push(`role = $${paramIndex}`)
+    params.push(String(req.body.role || '').trim())
+    paramIndex += 1
+  }
+
+  if (req.body?.status !== undefined) {
+    updates.push(`status = $${paramIndex}`)
+    params.push(String(req.body.status || '').trim())
+    paramIndex += 1
+  }
+
+  if (updates.length === 0) {
+    return jsonError(res, 400, '没有可更新的字段')
+  }
+
+  updates.push('updated_at = NOW()')
+  params.push(id)
+
+  const result = await executeQuery(
+    `UPDATE admin_users SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING id, username, full_name, role, status, created_at, updated_at`,
+    params
+  )
+
+  if (!result.success) {
+    return jsonError(res, 500, result.error || '更新管理员失败')
+  }
+
+  if (!result.data?.length) {
+    return jsonError(res, 404, '管理员不存在')
+  }
+
+  return res.json({ success: true, data: result.data[0], error: null })
+})
+
+app.put('/api/admin/users/:id/password', writeLimiter, async (req, res) => {
+  const { id } = req.params
+  const password = String(req.body?.password || '').trim()
+
+  if (!password) {
+    return jsonError(res, 400, '密码不能为空')
+  }
+
+  let hashedPassword
+  try {
+    hashedPassword = await hashAdminPassword(password)
+  } catch (error) {
+    return jsonError(res, 500, '密码加密失败')
+  }
+
+  const result = await executeQuery(
+    'UPDATE admin_users SET password = $1, updated_at = NOW() WHERE id = $2 RETURNING id',
+    [hashedPassword, id]
+  )
+
+  if (!result.success) {
+    return jsonError(res, 500, result.error || '更新密码失败')
+  }
+
+  if (!result.data?.length) {
+    return jsonError(res, 404, '管理员不存在')
+  }
+
+  return res.json({ success: true, data: { id }, error: null })
+})
+
+app.delete('/api/admin/users/:id', writeLimiter, async (req, res) => {
+  const { id } = req.params
+  const result = await executeQuery('DELETE FROM admin_users WHERE id = $1', [id])
+
+  if (!result.success) {
+    return jsonError(res, 500, result.error || '删除管理员失败')
+  }
+
+  if (!result.count) {
+    return jsonError(res, 404, '管理员不存在')
+  }
+
+  return res.json({ success: true, data: { id }, error: null })
+})
+
 // ==================== 管理员认证 API ====================
 
 app.post('/api/admin/login', async (req, res) => {
-  const { username, password } = req.body
+  const username = String(req.body?.username || '').trim()
+  const password = String(req.body?.password || '').trim()
 
   if (!username || !password) {
     return res.status(400).json({
@@ -1654,58 +1961,68 @@ app.post('/api/admin/login', async (req, res) => {
   }
 
   const result = await executeQuery(
-    'SELECT id, username, full_name, role, status FROM admin_users WHERE username = $1 AND password = $2 AND status = $3 LIMIT 1',
-    [username, password, 'active']
+    'SELECT id, username, full_name, role, status, password, created_at, updated_at FROM admin_users WHERE username = $1 LIMIT 1',
+    [username]
   )
 
-  if (result.success && result.data?.length > 0) {
-    res.json({ success: true, data: result.data[0], error: null })
-    return
+  if (!result.success) {
+    return jsonError(res, 500, result.error || '登录失败')
   }
 
-  // 如果数据库不可用或未找到用户，尝试本地回退文件（开发模式）
-  try {
-    const fallbackPath = join(__dirname, 'fallback_admin_users.json')
-    if (existsSync(fallbackPath)) {
-      const raw = JSON.parse(readFileSync(fallbackPath, 'utf8'))
-      const found = raw.find(u => u.username === username && u.password === password && u.status === 'active')
-      if (found) {
-        res.json({ success: true, data: found, error: null })
-        return
-      }
+  const user = result.data?.[0]
+  if (!user) {
+    return res.status(401).json({ success: false, data: null, error: '用户名或密码错误' })
+  }
+
+  if (user.status !== 'active') {
+    return res.status(403).json({ success: false, data: null, error: '账号已被禁用' })
+  }
+
+  const storedPassword = String(user.password || '')
+  let passwordValid = false
+
+  if (isBcryptHash(storedPassword)) {
+    passwordValid = await bcrypt.compare(password, storedPassword)
+  } else {
+    passwordValid = storedPassword === password
+  }
+
+  if (!passwordValid) {
+    return res.status(401).json({ success: false, data: null, error: '用户名或密码错误' })
+  }
+
+  if (!isBcryptHash(storedPassword)) {
+    try {
+      const upgradedHash = await hashAdminPassword(password)
+      await executeQuery(
+        'UPDATE admin_users SET password = $1, updated_at = NOW() WHERE id = $2',
+        [upgradedHash, user.id]
+      )
+    } catch (error) {
+      console.warn('⚠️ 密码升级失败:', error.message || error)
     }
-  } catch (err) {
-    console.warn('回退用户读取失败:', err.message)
   }
 
-  res.status(401).json({ success: false, data: null, error: '用户名或密码错误' })
+  const { password: _password, ...safeUser } = user
+  return res.json({ success: true, data: safeUser, error: null })
 })
 
 app.get('/api/admin/user/:username', async (req, res) => {
   const { username } = req.params
   const result = await executeQuery(
-    'SELECT id, username, full_name, role, status, password FROM admin_users WHERE username = $1 LIMIT 1',
+    'SELECT id, username, full_name, role, status, created_at, updated_at FROM admin_users WHERE username = $1 LIMIT 1',
     [username]
   )
-  if (result.success && result.data && result.data.length > 0) {
-    res.json({ ...result, data: result.data[0] })
-    return
+
+  if (!result.success) {
+    return jsonError(res, 500, result.error || '查询管理员失败')
   }
 
-  // DB 不可用或未找到，尝试本地回退
-  try {
-    const fallbackPath = join(__dirname, 'fallback_admin_users.json')
-    if (existsSync(fallbackPath)) {
-      const raw = JSON.parse(readFileSync(fallbackPath, 'utf8'))
-      const found = raw.find(u => u.username === username) || null
-      res.json({ success: !!found, data: found, error: found ? null : '用户未找到（回退）' })
-      return
-    }
-  } catch (err) {
-    console.warn('回退用户读取失败:', err.message)
+  if (result.data && result.data.length > 0) {
+    return res.json({ success: true, data: result.data[0], error: null })
   }
 
-  res.json({ ...result, data: result.data?.[0] || null })
+  return res.json({ success: true, data: null, error: null })
 })
 
 // ==================== 快捷 API（保持兼容）====================
@@ -1785,10 +2102,19 @@ app.get('/health', async (req, res) => {
 
 const PORT = process.env.API_PORT || 3001
 
-app.listen(PORT, () => {
-  console.log(`✅ API 服务器已启动: http://localhost:${PORT}`)
-  console.log(`📊 健康检查: http://localhost:${PORT}/health`)
-  console.log(`🔗 数据库连接池: 已初始化`)
+async function startServer() {
+  await ensureAdminSeed()
+
+  app.listen(PORT, () => {
+    console.log(`✅ API 服务器已启动: http://localhost:${PORT}`)
+    console.log(`📊 健康检查: http://localhost:${PORT}/health`)
+    console.log(`🔗 数据库连接池: 已初始化`)
+  })
+}
+
+startServer().catch((error) => {
+  console.error('❌ API 服务器启动失败:', error.message || error)
+  process.exit(1)
 })
 
 process.on('SIGINT', async () => {

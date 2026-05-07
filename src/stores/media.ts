@@ -116,6 +116,37 @@ export const useMediaStore = defineStore('media', {
         this.items = items
         console.log(`从数据库加载了 ${items.length} 个媒体文件（仅未删除）`)
         
+        // 修复本地数据中的重名问题 (例如: 修改了名字导致 localStorage 中存留旧名)
+        try {
+          const savedFolders = localStorage.getItem('photoStudentFolders')
+          if (savedFolders) {
+            const localFolders = JSON.parse(savedFolders) as Array<{ studentId: string; studentName: string }>
+            
+            // 构建数据库中准确的 studentId -> studentName 映射
+            const accurateMap = new Map<string, string>()
+            items.forEach(i => {
+              if (i.studentId && i.studentName) accurateMap.set(i.studentId, i.studentName)
+            })
+
+            // 过滤并校正旧的本地缓存
+            const correctedFolders: Array<{ studentId: string; studentName: string }> = []
+            const seenIds = new Set<string>()
+
+            for (const f of localFolders) {
+              const correctName = accurateMap.get(f.studentId) || f.studentName
+              
+              if (!seenIds.has(f.studentId)) {
+                seenIds.add(f.studentId)
+                correctedFolders.push({ studentId: f.studentId, studentName: correctName })
+              }
+            }
+
+            localStorage.setItem('photoStudentFolders', JSON.stringify(correctedFolders))
+          }
+        } catch(e) {
+          console.warn('修复重名数据失败:', e)
+        }
+
         // 清空 localStorage 中的旧缓存，避免干扰
         localStorage.removeItem('mediaItems')
         

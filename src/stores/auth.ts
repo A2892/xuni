@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { getAdminUser, createAdminUser } from '@/utils/cockroachdbService'
+import { adminLogin, getAdminUser, createAdminUser } from '@/utils/cockroachdbService'
 import { setCurrentUser } from '@/lib/supabase'
 
 interface AdminUser {
@@ -46,22 +46,11 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       console.log('🔑 开始登录:', username)
 
-      // 从 CockroachDB 查询管理员用户
-      const result = await getAdminUser(username)
+      const result = await adminLogin(username, password)
       const user = result.data
 
       if (!user) {
-        console.error('❌ 用户不存在:', username)
-        return false
-      }
-
-      if (user.password !== password) {
-        console.error('❌ 密码错误')
-        return false
-      }
-
-      if (user.status !== 'active') {
-        console.error('❌ 用户被禁用')
+        console.error('❌ 用户不存在或密码错误')
         return false
       }
 

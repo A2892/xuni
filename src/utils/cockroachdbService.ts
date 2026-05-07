@@ -246,6 +246,38 @@ export async function createAdminUser(data: any) {
 }
 
 /**
+ * 更新管理员信息
+ */
+export async function updateAdminUser(id: string, data: any) {
+  return apiCall<any>(
+    `/api/admin/users/${id}`,
+    'PUT',
+    data
+  )
+}
+
+/**
+ * 更新管理员密码
+ */
+export async function updateAdminPassword(id: string, password: string) {
+  return apiCall<any>(
+    `/api/admin/users/${id}/password`,
+    'PUT',
+    { password }
+  )
+}
+
+/**
+ * 删除管理员
+ */
+export async function deleteAdminUser(id: string) {
+  return apiCall<any>(
+    `/api/admin/users/${id}`,
+    'DELETE'
+  )
+}
+
+/**
  * 管理员登录
  */
 export async function adminLogin(username: string, password: string) {
@@ -330,6 +362,9 @@ export default {
   getAdminUser,
   getAllAdminUsers,
   createAdminUser,
+  updateAdminUser,
+  updateAdminPassword,
+  deleteAdminUser,
   adminLogin,
   getDataStats,
   testConnection

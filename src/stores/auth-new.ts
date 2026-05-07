@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { getAdminUser, createAdminUser } from '@/utils/cockroachdbService'
+import { adminLogin, getAdminUser, createAdminUser } from '@/utils/cockroachdbService'
 
 interface AdminUser {
   id: string
@@ -32,11 +32,10 @@ export const useAuthStore = defineStore('auth', () => {
   // 登录
   const login = async (username: string, password: string, remember: boolean = false) => {
     try {
-      // 查询管理员用户
-      const result = await getAdminUser(username)
+      const result = await adminLogin(username, password)
       const user = result.data
 
-      if (!user || user.password !== password || user.status !== 'active') {
+      if (!user) {
         console.error('登录失败：用户名或密码错误')
         return false
       }

@@ -1332,6 +1332,33 @@ const updateStudentInfo = async () => {
     if (!profileResult.success) {
       console.warn('更新学生档案失败:', profileResult.error)
     }
+
+    // 3. 更新本地保存在 localStorage 的空文件夹信息（避免出现重名/旧名的重复虚拟文件夹）
+    try {
+      const existingReqFolders = JSON.parse(localStorage.getItem('photoStudentFolders') || '[]')
+      const updatedLocal = existingReqFolders.map((f: any) => {
+        if (f.studentId === originalId || f.studentName === originalName) {
+          return { ...f, studentId: newId, studentName: newName }
+        }
+        return f
+      })
+      localStorage.setItem('photoStudentFolders', JSON.stringify(updatedLocal))
+    } catch (e) {
+      console.warn('更新本地photoStudentFolders失败:', e)
+    }
+
+    // 4. 更新相关的子文件夹（标签）关联
+    let foldersChanged = false
+    mediaStore.folders.forEach((f: any) => {
+      if (f.studentId === originalId || f.studentName === originalName) {
+        f.studentId = newId
+        f.studentName = newName
+        foldersChanged = true
+      }
+    })
+    if (foldersChanged) {
+      mediaStore.saveFoldersToLocal()
+    }
     
     alert(`✅ 学生信息已更新！\n📝 ${batchResult.count} 个文件已同步更新`)
     closeEditDialog()
