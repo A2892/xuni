@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase'
 // 当项目迁移到 CockroachDB（蟑螂云）时，前端通过后端 API 访问数据
-const API_BASE_URL = import.meta.env.DEV ? 'http://localhost:3001' : ''
+const API_BASE_URL = import.meta.env.DEV ? 'http://localhost:3001' : (import.meta.env.VITE_API_BASE_URL || '')
 const useCockroachApi = !!import.meta.env.VITE_COCKROACHDB_URL
 const MAX_MEDIA_FILE_SIZE = Number(import.meta.env.VITE_MAX_MEDIA_FILE_SIZE || 5 * 1024 * 1024 * 1024)
 const VIDEO_CLOUDINARY_MAX_SIZE = Number(import.meta.env.VITE_VIDEO_CLOUDINARY_MAX_SIZE || 100 * 1024 * 1024)

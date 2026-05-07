@@ -166,7 +166,7 @@ import { getStudentProfiles } from '@/utils/studentProfileService'
 import type { MediaItem } from '@/types/media'
 import type { StudentProfile } from '@/types/student'
 
-const API_BASE_URL = import.meta.env.DEV ? 'http://localhost:3001' : ''
+const API_BASE_URL = import.meta.env.DEV ? 'http://localhost:3001' : (import.meta.env.VITE_API_BASE_URL || '')
 const MAX_MEDIA_FILE_SIZE = Number(import.meta.env.VITE_MAX_MEDIA_FILE_SIZE || 5 * 1024 * 1024 * 1024)
 
 interface CloudStorageSummary {
