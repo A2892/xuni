@@ -3,15 +3,14 @@
   publish = "dist"
   functions = "netlify/functions"
 
-# API rewrites - forward all /api/* requests to the serverless function
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
   force = true
 
-# SPA fallback for other routes
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+

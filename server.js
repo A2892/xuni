@@ -18,10 +18,22 @@ import { Readable } from 'stream'
 
 dotenv.config()
 
-// 只在非 Functions 环境中声明 __filename 和 __dirname
-// Netlify Functions 会自动提供这两个变量
-let __filename = typeof globalThis.__filename !== 'undefined' ? globalThis.__filename : fileURLToPath(import.meta.url)
-let __dirname = typeof globalThis.__dirname !== 'undefined' ? globalThis.__dirname : dirname(__filename)
+// 在 Netlify Functions 环境中，__filename 会自动提供
+// 我们只在需要时安全地声明它
+let __filename, __dirname
+try {
+  if (!globalThis.__filename) {
+    __filename = fileURLToPath(import.meta.url)
+    __dirname = dirname(__filename)
+  } else {
+    __filename = globalThis.__filename  
+    __dirname = globalThis.__dirname
+  }
+} catch (e) {
+  // 如果上面都失败，使用备用方案
+  __filename = import.meta.url
+  __dirname = '.'
+}
 
 const app = express()
 const { Pool } = pg
