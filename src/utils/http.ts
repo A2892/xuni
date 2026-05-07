@@ -321,7 +321,7 @@ class HttpClient {
 
 // 创建默认实例
 export const http = new HttpClient({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || '',
   timeout: 30000
 })
 

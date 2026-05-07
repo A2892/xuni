@@ -2105,16 +2105,17 @@ const PORT = process.env.API_PORT || 3001
 async function startServer() {
   await ensureAdminSeed()
 
-  app.listen(PORT, () => {
-    console.log(`✅ API 服务器已启动: http://localhost:${PORT}`)
-    console.log(`📊 健康检查: http://localhost:${PORT}/health`)
-    console.log(`🔗 数据库连接池: 已初始化`)
-  })
+  if (process.env.NODE_ENV !== 'production' && process.env.VERCEL !== '1' && !process.env.NETLIFY) {
+    app.listen(PORT, () => {
+      console.log(`✅ API 服务器已启动: http://localhost:${PORT}`)
+      console.log(`📊 健康检查: http://localhost:${PORT}/health`)
+      console.log(`🔗 数据库连接池: 已初始化`)
+    })
+  }
 }
 
 startServer().catch((error) => {
   console.error('❌ API 服务器启动失败:', error.message || error)
-  process.exit(1)
 })
 
 process.on('SIGINT', async () => {
@@ -2122,3 +2123,6 @@ process.on('SIGINT', async () => {
   await pool.end()
   process.exit(0)
 })
+
+export default app
+
