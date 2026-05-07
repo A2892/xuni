@@ -1,14 +1,14 @@
 import { defineStore } from 'pinia'
 
 export interface WeChatMessage {
-  id: string
+  id?: string
   type: 'text' | 'image' | 'voice' | 'video' | 'location' | 'transfer' | 'red_packet'
   content: string
-  sender: string
-  senderAvatar: string
+  sender?: string
+  senderAvatar?: string
   timestamp: string
   isSelf: boolean
-  isRead: boolean
+  isRead?: boolean
   imageUrl?: string
   voiceDuration?: number
   amount?: number
