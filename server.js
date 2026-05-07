@@ -18,12 +18,10 @@ import { Readable } from 'stream'
 
 dotenv.config()
 
-// 避免在 Netlify Functions 中重复声明 __filename
-let __filename, __dirname
-if (typeof import.meta.url !== 'undefined') {
-  __filename = fileURLToPath(import.meta.url)
-  __dirname = dirname(__filename)
-}
+// 只在非 Functions 环境中声明 __filename 和 __dirname
+// Netlify Functions 会自动提供这两个变量
+let __filename = typeof globalThis.__filename !== 'undefined' ? globalThis.__filename : fileURLToPath(import.meta.url)
+let __dirname = typeof globalThis.__dirname !== 'undefined' ? globalThis.__dirname : dirname(__filename)
 
 const app = express()
 const { Pool } = pg
