@@ -18,8 +18,12 @@ import { Readable } from 'stream'
 
 dotenv.config()
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
+// 避免在 Netlify Functions 中重复声明 __filename
+let __filename, __dirname
+if (typeof import.meta.url !== 'undefined') {
+  __filename = fileURLToPath(import.meta.url)
+  __dirname = dirname(__filename)
+}
 
 const app = express()
 const { Pool } = pg
