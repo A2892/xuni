@@ -1000,6 +1000,9 @@ export async function loadMediaFiles(): Promise<MediaItem[]> {
         const res = await fetch(`${API_BASE_URL}/api/student-media`)
         if (res.ok) {
           const json = await res.json()
+          if (json && json.success === false) {
+            throw new Error(String(json.error || '媒体查询失败'))
+          }
           // 期待后端返回 { success: true, data: [...] } 或直接数组
           const records = Array.isArray(json) ? json : (json.data || [])
           if (Array.isArray(records) && records.length > 0) {
@@ -1020,10 +1023,12 @@ export async function loadMediaFiles(): Promise<MediaItem[]> {
             }))
           }
         } else {
-          console.warn('[mediaService] Cockroach API 请求失败', res.status)
+          const text = await res.text().catch(() => '')
+          throw new Error(text || `媒体接口请求失败 (${res.status})`)
         }
       } catch (e) {
         console.warn('[mediaService] Cockroach API 回退异常', e)
+        throw e
       }
     }
 
