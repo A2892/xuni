@@ -196,6 +196,11 @@ export function resolveFastVideoUrl(item: any): string {
   const currentUrl = normalizeLegacyApiUrl(String(item?.url || '').trim())
   const rawStoragePath = String(item?.storage_path || item?.storagePath || '').trim()
 
+  // 优先保留可直连的 R2 地址，避免卡片预览阶段全部走 Netlify 流式代理。
+  if (currentUrl.includes('r2.cloudflarestorage.com/')) {
+    return currentUrl
+  }
+
   if (currentUrl.includes('/api/r2/stream?objectKey=')) {
     return currentUrl
   }
@@ -717,11 +722,6 @@ export async function resolvePlayableVideoUrl(item: MediaItem | any): Promise<st
     return String(VIDEO_PLAY_URL_CACHE.get(itemId) || currentUrl)
   }
 
-  if (currentUrl.includes('/api/r2/stream?objectKey=')) {
-    if (itemId) VIDEO_PLAY_URL_CACHE.set(itemId, currentUrl)
-    return currentUrl
-  }
-
   if (currentUrl.includes('X-Amz-Algorithm=')) {
     if (itemId) VIDEO_PLAY_URL_CACHE.set(itemId, currentUrl)
     return currentUrl
@@ -745,12 +745,6 @@ export async function resolvePlayableVideoUrl(item: MediaItem | any): Promise<st
     return currentUrl
   }
 
-  const streamUrl = buildR2StreamUrl(objectKey)
-  if (streamUrl) {
-    if (itemId) VIDEO_PLAY_URL_CACHE.set(itemId, streamUrl)
-    return streamUrl
-  }
-
   try {
     const response = await fetch(`${API_BASE_URL}/api/r2/presign-read`, {
       method: 'POST',
@@ -767,7 +761,13 @@ export async function resolvePlayableVideoUrl(item: MediaItem | any): Promise<st
     if (itemId && signedUrl) VIDEO_PLAY_URL_CACHE.set(itemId, signedUrl)
     return signedUrl || currentUrl
   } catch (error) {
-    console.warn('获取 R2 播放签名地址失败，回退原地址:', error)
+    const streamUrl = buildR2StreamUrl(objectKey)
+    if (streamUrl) {
+      if (itemId) VIDEO_PLAY_URL_CACHE.set(itemId, streamUrl)
+      return streamUrl
+    }
+
+    console.warn('获取 R2 播放地址失败，回退原地址:', error)
     return currentUrl
   }
 }
