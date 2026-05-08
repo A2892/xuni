@@ -276,16 +276,16 @@
             <div class="media-thumbnail" @click.stop="selectMedia(item)" @mouseenter="enableCardVideoPreview(item.id)">
               <img v-if="item.type === 'photo'" :src="item.url" :alt="item.fileName" />
               <img
-                v-else-if="item.thumbnail"
+                v-else-if="item.type === 'photo' && item.thumbnail"
                 :src="item.thumbnail"
                 :alt="item.fileName"
                 class="video-poster-thumb"
               />
-              <template v-else-if="shouldRenderCardVideoPreview(item, index)">
+              <template v-else-if="item.type === 'video'">
                 <video
                   v-if="!isCardVideoErrored(item.id)"
                   class="video-preview-shell"
-                  :src="getCardVideoPreviewSrc(item)"
+                  :src="item.url"
                   :poster="getCardVideoPosterSrc(item)"
                   autoplay
                   loop
@@ -351,16 +351,16 @@
           <div class="trash-thumbnail" @mouseenter="enableCardVideoPreview(deleted.item.id)">
             <img v-if="deleted.item.type === 'photo'" :src="deleted.item.url" :alt="deleted.item.fileName" />
             <img
-              v-else-if="deleted.item.thumbnail"
+              v-else-if="deleted.item.type === 'photo' && deleted.item.thumbnail"
               :src="deleted.item.thumbnail"
               :alt="deleted.item.fileName"
               class="video-poster-thumb"
             />
-            <template v-else-if="shouldRenderCardVideoPreview(deleted.item, index)">
+            <template v-else-if="deleted.item.type === 'video'">
               <video
                 v-if="!isCardVideoErrored(deleted.item.id)"
                 class="video-preview-shell"
-                :src="getCardVideoPreviewSrc(deleted.item)"
+                :src="deleted.item.url"
                 :poster="getCardVideoPosterSrc(deleted.item)"
                 autoplay
                 loop
@@ -528,16 +528,16 @@
               <div class="media-thumbnail" @click.stop="selectMedia(item)" @mouseenter="enableCardVideoPreview(item.id)">
                 <img v-if="item.type === 'photo'" :src="item.url" :alt="item.fileName" />
                 <img
-                  v-else-if="item.thumbnail"
+                  v-else-if="item.type === 'photo' && item.thumbnail"
                   :src="item.thumbnail"
                   :alt="item.fileName"
                   class="video-poster-thumb"
                 />
-                <template v-else-if="shouldRenderCardVideoPreview(item, index)">
+                <template v-else-if="item.type === 'video'">
                   <video
                     v-if="!isCardVideoErrored(item.id)"
                     class="video-preview-shell"
-                    :src="getCardVideoPreviewSrc(item)"
+                    :src="item.url"
                     :poster="getCardVideoPosterSrc(item)"
                     autoplay
                     loop
@@ -1036,17 +1036,13 @@ const onCardVideoError = (itemId: string) => {
 }
 
 const shouldRenderCardVideoPreview = (item: MediaItem, index: number): boolean => {
-  if (!item || item.type !== 'video') return false
-  if (String(item.thumbnail || '').trim()) return false
-  if (index < 8) return true
-  return cardVideoPreviewEnabledIds.value.has(item.id)
+  return !!item && item.type === 'video'
 }
 
 const getCardVideoPreviewSrc = (item: MediaItem): string => {
   const raw = String(item?.url || '').trim()
   if (!raw) return ''
-  if (raw.includes('#t=')) return raw
-  return `${raw}#t=0.1`
+  return raw
 }
 
 const getCardVideoPosterSrc = (item: MediaItem): string => {
