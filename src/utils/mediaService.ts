@@ -196,8 +196,12 @@ export function resolveFastVideoUrl(item: any): string {
   const currentUrl = normalizeLegacyApiUrl(String(item?.url || '').trim())
   const rawStoragePath = String(item?.storage_path || item?.storagePath || '').trim()
 
-  // 优先保留可直连的 R2 地址，避免卡片预览阶段全部走 Netlify 流式代理。
   if (currentUrl.includes('r2.cloudflarestorage.com/')) {
+    const keyFromUrl = extractR2ObjectKeyFromUrl(currentUrl)
+    if (keyFromUrl) {
+      const streamUrl = buildR2StreamUrl(keyFromUrl)
+      if (streamUrl) return streamUrl
+    }
     return currentUrl
   }
 

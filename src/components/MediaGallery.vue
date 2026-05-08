@@ -285,13 +285,14 @@
                 <video
                   v-if="!isCardVideoErrored(item.id)"
                   class="video-preview-shell"
-                  :src="item.url"
+                  :src="getCardVideoPreviewSrc(item)"
                   :poster="getCardVideoPosterSrc(item)"
                   autoplay
                   loop
                   muted
                   playsinline
                   preload="auto"
+                  crossorigin="anonymous"
                   @loadeddata="(event) => handleCardVideoLoaded(event, item.id)"
                   @error="() => onCardVideoError(item.id)"
                 ></video>
@@ -360,13 +361,14 @@
               <video
                 v-if="!isCardVideoErrored(deleted.item.id)"
                 class="video-preview-shell"
-                :src="deleted.item.url"
+                  :src="getCardVideoPreviewSrc(deleted.item)"
                 :poster="getCardVideoPosterSrc(deleted.item)"
                 autoplay
                 loop
                 muted
                 playsinline
                 preload="auto"
+                  crossorigin="anonymous"
                 @loadeddata="(event) => handleCardVideoLoaded(event, deleted.item.id)"
                 @error="() => onCardVideoError(deleted.item.id)"
               ></video>
@@ -537,13 +539,14 @@
                   <video
                     v-if="!isCardVideoErrored(item.id)"
                     class="video-preview-shell"
-                    :src="item.url"
+                    :src="getCardVideoPreviewSrc(item)"
                     :poster="getCardVideoPosterSrc(item)"
                     autoplay
                     loop
                     muted
                     playsinline
                     preload="auto"
+                    crossorigin="anonymous"
                     @loadeddata="(event) => handleCardVideoLoaded(event, item.id)"
                     @error="() => onCardVideoError(item.id)"
                   ></video>
@@ -1040,9 +1043,7 @@ const shouldRenderCardVideoPreview = (item: MediaItem, index: number): boolean =
 }
 
 const getCardVideoPreviewSrc = (item: MediaItem): string => {
-  const raw = String(item?.url || '').trim()
-  if (!raw) return ''
-  return raw
+  return resolveFastVideoUrl(item as any)
 }
 
 const getCardVideoPosterSrc = (item: MediaItem): string => {
