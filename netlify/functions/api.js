@@ -2,11 +2,158 @@ import express from 'express'
 import cors from 'cors'
 import pg from 'pg'
 import bcrypt from 'bcryptjs'
+import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import serverless from 'serverless-http'
+import { Readable } from 'stream'
 
 const { Pool } = pg
 const connectionString = process.env.COCKROACHDB_URL || process.env.VITE_COCKROACHDB_URL
 const pool = connectionString ? new Pool({ connectionString }) : null
+
+const SAFE_STORAGE_PATH_PATTERN = /^[a-zA-Z0-9/_\-.()]+$/
+const SAFE_BUCKET_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9-_]{1,63}$/
+
+const R2_ACCOUNT_ID = String(process.env.R2_ACCOUNT_ID || '').trim()
+const R2_ACCESS_KEY_ID = String(process.env.R2_ACCESS_KEY_ID || '').trim()
+const R2_SECRET_ACCESS_KEY = String(process.env.R2_SECRET_ACCESS_KEY || '').trim()
+const R2_BUCKET = String(process.env.R2_BUCKET || '').trim()
+const R2_ENDPOINT = String(process.env.R2_ENDPOINT || '').trim().replace(/\/+$/, '')
+const R2_PUBLIC_BASE_URL = String(process.env.R2_PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '')
+const R2_NEW_ACCOUNT_ID = String(process.env.R2_NEW_ACCOUNT_ID || '').trim()
+const R2_NEW_ACCESS_KEY_ID = String(process.env.R2_NEW_ACCESS_KEY_ID || '').trim()
+const R2_NEW_SECRET_ACCESS_KEY = String(process.env.R2_NEW_SECRET_ACCESS_KEY || '').trim()
+const R2_NEW_BUCKET = String(process.env.R2_NEW_BUCKET || '').trim()
+const R2_NEW_ENDPOINT = String(process.env.R2_NEW_ENDPOINT || '').trim().replace(/\/+$/, '')
+const R2_NEW_PUBLIC_BASE_URL = String(process.env.R2_NEW_PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '')
+const R2_NEW_SIGNED_URL_EXPIRES_SECONDS = Number.parseInt(String(process.env.R2_NEW_SIGNED_URL_EXPIRES_SECONDS || 900), 10) || 900
+const R2_SIGNED_URL_EXPIRES_SECONDS = Number.parseInt(String(process.env.R2_SIGNED_URL_EXPIRES_SECONDS || 900), 10) || 900
+const R2_NEW_OBJECT_KEY_PREFIX = String(process.env.R2_NEW_OBJECT_KEY_PREFIX || 'r2v2').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+
+function isR2Configured(config) {
+  return Boolean(config && config.accountId && config.accessKeyId && config.secretAccessKey && config.bucket && config.endpoint)
+}
+
+const R2_LEGACY_CONFIG = {
+  accountId: R2_ACCOUNT_ID,
+  accessKeyId: R2_ACCESS_KEY_ID,
+  secretAccessKey: R2_SECRET_ACCESS_KEY,
+  bucket: R2_BUCKET,
+  endpoint: R2_ENDPOINT,
+  publicBaseUrl: R2_PUBLIC_BASE_URL,
+  signedUrlExpiresSeconds: R2_SIGNED_URL_EXPIRES_SECONDS
+}
+
+const R2_NEW_CONFIG = {
+  accountId: R2_NEW_ACCOUNT_ID,
+  accessKeyId: R2_NEW_ACCESS_KEY_ID,
+  secretAccessKey: R2_NEW_SECRET_ACCESS_KEY,
+  bucket: R2_NEW_BUCKET,
+  endpoint: R2_NEW_ENDPOINT,
+  publicBaseUrl: R2_NEW_PUBLIC_BASE_URL,
+  signedUrlExpiresSeconds: R2_NEW_SIGNED_URL_EXPIRES_SECONDS
+}
+
+function normalizeStoragePath(input) {
+  if (typeof input !== 'string') return null
+  const path = input.trim().replace(/\\/g, '/')
+  if (!path || path.length > 512) return null
+  if (path.startsWith('/') || path.includes('..') || path.includes('//')) return null
+  if (!SAFE_STORAGE_PATH_PATTERN.test(path)) return null
+  return path
+}
+
+function normalizeR2ObjectKey(input) {
+  const key = String(input || '').trim().replace(/\\/g, '/')
+  if (!key || key.length > 512) return ''
+  if (key.startsWith('/') || key.includes('..') || key.includes('//')) return ''
+  if (!SAFE_STORAGE_PATH_PATTERN.test(key)) return ''
+  return key
+}
+
+function resolveR2ConfigForObjectKey(objectKey) {
+  const normalizedKey = normalizeR2ObjectKey(objectKey)
+  if (!normalizedKey) return { config: null, objectKey: '' }
+
+  if (isR2Configured(R2_NEW_CONFIG) && R2_NEW_OBJECT_KEY_PREFIX && normalizedKey.startsWith(R2_NEW_OBJECT_KEY_PREFIX)) {
+    return { config: R2_NEW_CONFIG, objectKey: normalizedKey }
+  }
+
+  if (isR2Configured(R2_LEGACY_CONFIG)) {
+    return { config: R2_LEGACY_CONFIG, objectKey: normalizedKey }
+  }
+
+  if (isR2Configured(R2_NEW_CONFIG)) {
+    return { config: R2_NEW_CONFIG, objectKey: normalizedKey }
+  }
+
+  return { config: null, objectKey: normalizedKey }
+}
+
+function buildR2PublicUrl(objectKey, config = R2_LEGACY_CONFIG) {
+  const normalizedKey = normalizeR2ObjectKey(objectKey)
+  if (!normalizedKey || !config) return ''
+  if (config.publicBaseUrl) return `${config.publicBaseUrl}/${normalizedKey}`
+  if (!config.endpoint || !config.bucket) return ''
+  return `${config.endpoint}/${config.bucket}/${normalizedKey}`
+}
+
+function ensureValidBucket(res, bucket) {
+  if (!SAFE_BUCKET_PATTERN.test(String(bucket || ''))) {
+    res.status(400).json({ success: false, data: null, error: '无效的 bucket' })
+    return false
+  }
+  return true
+}
+
+function getR2Client(config) {
+  if (!isR2Configured(config)) return null
+  return new S3Client({
+    region: 'auto',
+    endpoint: config.endpoint,
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey
+    }
+  })
+}
+
+async function loadFileFromDb(bucket, filePath) {
+  const result = await query(
+    `SELECT id, file_data, content_type, file_size, is_chunked, total_chunks
+     FROM file_storage
+     WHERE bucket = $1 AND path = $2
+     LIMIT 1`,
+    [bucket, filePath]
+  )
+
+  if (!result.rows?.length) return null
+  const file = result.rows[0]
+
+  if (!file.is_chunked) {
+    return {
+      data: file.file_data || Buffer.alloc(0),
+      contentType: file.content_type || 'application/octet-stream',
+      fileSize: file.file_size || 0
+    }
+  }
+
+  const chunks = await query(
+    `SELECT chunk_data
+     FROM file_chunks
+     WHERE file_id = $1
+     ORDER BY chunk_index ASC`,
+    [file.id]
+  )
+
+  const buffers = (chunks.rows || []).map((row) => row.chunk_data || Buffer.alloc(0))
+  return {
+    data: Buffer.concat(buffers),
+    contentType: file.content_type || 'application/octet-stream',
+    fileSize: file.file_size || 0
+  }
+}
 
 const app = express()
 
@@ -408,6 +555,134 @@ app.get('/api/student-media/:studentId', async (req, res) => {
     [req.params.studentId]
   )
   res.json(result)
+})
+
+app.get('/api/storage/:bucket/file', async (req, res) => {
+  const { bucket } = req.params
+  if (!ensureValidBucket(res, bucket)) return
+
+  const filePath = normalizeStoragePath(String(req.query.path || ''))
+  if (!filePath) {
+    return jsonError(res, 400, 'path 不能为空')
+  }
+
+  try {
+    const file = await loadFileFromDb(bucket, filePath)
+    if (!file) {
+      return res.status(404).json({ success: false, data: null, error: '文件不存在' })
+    }
+
+    res.setHeader('Content-Type', file.contentType)
+    res.setHeader('Content-Length', String(file.fileSize))
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    return res.send(file.data)
+  } catch (error) {
+    return jsonError(res, 500, error.message || '文件读取失败')
+  }
+})
+
+app.get('/api/storage/:bucket/public-url', (req, res) => {
+  const { bucket } = req.params
+  if (!ensureValidBucket(res, bucket)) return
+
+  const filePath = normalizeStoragePath(String(req.query.path || ''))
+  if (!filePath) {
+    return jsonError(res, 400, '无效的文件路径')
+  }
+
+  const publicUrl = `${req.protocol}://${req.get('host')}/api/storage/${bucket}/file?path=${encodeURIComponent(filePath)}`
+  return res.json({ success: true, data: { publicUrl }, error: null })
+})
+
+app.post('/api/r2/public-url', async (req, res) => {
+  const resolved = resolveR2ConfigForObjectKey(req.body?.objectKey)
+  if (!resolved.objectKey) return jsonError(res, 400, 'objectKey 无效')
+  if (!resolved.config) return jsonError(res, 503, 'R2 未配置')
+
+  const publicUrl = buildR2PublicUrl(resolved.objectKey, resolved.config)
+  if (!publicUrl) return jsonError(res, 500, '无法生成 R2 公共 URL')
+  return res.json({ success: true, data: { objectKey: resolved.objectKey, publicUrl }, error: null })
+})
+
+app.post('/api/r2/presign-read', async (req, res) => {
+  const resolved = resolveR2ConfigForObjectKey(req.body?.objectKey)
+  if (!resolved.objectKey) return jsonError(res, 400, 'objectKey 无效')
+  if (!resolved.config) return jsonError(res, 503, 'R2 未配置')
+
+  try {
+    const client = getR2Client(resolved.config)
+    if (!client) return jsonError(res, 503, 'R2 客户端初始化失败')
+
+    const command = new GetObjectCommand({
+      Bucket: resolved.config.bucket,
+      Key: resolved.objectKey
+    })
+
+    const signedUrl = await getSignedUrl(client, command, { expiresIn: resolved.config.signedUrlExpiresSeconds })
+    return res.json({
+      success: true,
+      data: { objectKey: resolved.objectKey, signedUrl, expiresIn: resolved.config.signedUrlExpiresSeconds },
+      error: null
+    })
+  } catch (error) {
+    return jsonError(res, 500, error.message || '生成 R2 预签名下载地址失败')
+  }
+})
+
+app.get('/api/r2/stream', async (req, res) => {
+  const resolved = resolveR2ConfigForObjectKey(req.query?.objectKey)
+  if (!resolved.objectKey) return jsonError(res, 400, 'objectKey 无效')
+  if (!resolved.config) return jsonError(res, 503, 'R2 未配置')
+
+  try {
+    const client = getR2Client(resolved.config)
+    if (!client) return jsonError(res, 503, 'R2 客户端初始化失败')
+
+    const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range.trim() : ''
+    const command = new GetObjectCommand({
+      Bucket: resolved.config.bucket,
+      Key: resolved.objectKey,
+      ...(rangeHeader ? { Range: rangeHeader } : {})
+    })
+
+    const output = await client.send(command)
+    const body = output.Body
+    if (!body) return jsonError(res, 404, '对象不存在或内容为空')
+
+    const hasRange = Boolean(output.ContentRange)
+    res.status(hasRange ? 206 : 200)
+    res.setHeader('Accept-Ranges', 'bytes')
+    res.setHeader('Cache-Control', 'private, max-age=60')
+    if (output.ContentType) res.setHeader('Content-Type', output.ContentType)
+    if (output.ContentLength != null) res.setHeader('Content-Length', String(output.ContentLength))
+    if (output.ContentRange) res.setHeader('Content-Range', output.ContentRange)
+    if (output.ETag) res.setHeader('ETag', output.ETag)
+    if (output.LastModified) res.setHeader('Last-Modified', output.LastModified.toUTCString())
+
+    if (typeof body.pipe === 'function') {
+      body.pipe(res)
+      return
+    }
+
+    if (typeof body.transformToWebStream === 'function') {
+      Readable.fromWeb(body.transformToWebStream()).pipe(res)
+      return
+    }
+
+    if (typeof body.transformToByteArray === 'function') {
+      res.end(Buffer.from(await body.transformToByteArray()))
+      return
+    }
+
+    return jsonError(res, 500, '不支持的 R2 响应流类型')
+  } catch (error) {
+    const message = String(error?.message || error || '')
+    const statusCode = Number(error?.$metadata?.httpStatusCode || 0)
+    if (statusCode === 404 || message.includes('NoSuchKey') || message.includes('NotFound')) {
+      return jsonError(res, 404, 'R2 对象不存在')
+    }
+    return jsonError(res, 500, error.message || 'R2 流式读取失败')
+  }
 })
 
 app.get('/api/student-documents/:studentId', async (req, res) => {
