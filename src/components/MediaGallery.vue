@@ -282,26 +282,20 @@
                 class="video-poster-thumb"
               />
               <template v-else-if="shouldRenderCardVideoPreview(item, index)">
-                <div class="video-preview-shell" :class="{ loaded: isCardVideoLoaded(item.id), errored: isCardVideoErrored(item.id) }">
-                  <img
-                    class="video-preview-poster"
-                    :src="getCardVideoPosterSrc(item)"
-                    :alt="item.fileName"
-                  />
-                  <video
-                    v-if="!isCardVideoErrored(item.id)"
-                    class="video-preview-layer"
-                    :src="getCardVideoPreviewSrc(item)"
-                    preload="metadata"
-                    playsinline
-                    muted
-                    @loadeddata="() => onCardVideoLoaded(item.id)"
-                    @error="() => onCardVideoError(item.id)"
-                  ></video>
-                  <div class="video-preview-badge">
-                    <span class="video-preview-badge-icon">▶</span>
-                  </div>
-                </div>
+                <video
+                  v-if="!isCardVideoErrored(item.id)"
+                  class="video-preview-shell"
+                  :src="getCardVideoPreviewSrc(item)"
+                  :poster="getCardVideoPosterSrc(item)"
+                  autoplay
+                  loop
+                  muted
+                  playsinline
+                  preload="auto"
+                  @loadeddata="(event) => handleCardVideoLoaded(event, item.id)"
+                  @error="() => onCardVideoError(item.id)"
+                ></video>
+                <img v-else :src="getCardVideoPosterSrc(item)" :alt="item.fileName" class="video-poster-thumb" />
               </template>
               <div v-else class="video-thumb-placeholder" aria-label="视频文件">
                 <span class="video-thumb-icon">🎥</span>
@@ -363,26 +357,20 @@
               class="video-poster-thumb"
             />
             <template v-else-if="shouldRenderCardVideoPreview(deleted.item, index)">
-              <div class="video-preview-shell" :class="{ loaded: isCardVideoLoaded(deleted.item.id), errored: isCardVideoErrored(deleted.item.id) }">
-                <img
-                  class="video-preview-poster"
-                  :src="getCardVideoPosterSrc(deleted.item)"
-                  :alt="deleted.item.fileName"
-                />
-                <video
-                  v-if="!isCardVideoErrored(deleted.item.id)"
-                  class="video-preview-layer"
-                  :src="getCardVideoPreviewSrc(deleted.item)"
-                  preload="metadata"
-                  playsinline
-                  muted
-                  @loadeddata="() => onCardVideoLoaded(deleted.item.id)"
-                  @error="() => onCardVideoError(deleted.item.id)"
-                ></video>
-                <div class="video-preview-badge">
-                  <span class="video-preview-badge-icon">▶</span>
-                </div>
-              </div>
+              <video
+                v-if="!isCardVideoErrored(deleted.item.id)"
+                class="video-preview-shell"
+                :src="getCardVideoPreviewSrc(deleted.item)"
+                :poster="getCardVideoPosterSrc(deleted.item)"
+                autoplay
+                loop
+                muted
+                playsinline
+                preload="auto"
+                @loadeddata="(event) => handleCardVideoLoaded(event, deleted.item.id)"
+                @error="() => onCardVideoError(deleted.item.id)"
+              ></video>
+              <img v-else :src="getCardVideoPosterSrc(deleted.item)" :alt="deleted.item.fileName" class="video-poster-thumb" />
             </template>
             <div v-else class="video-thumb-placeholder" aria-label="视频文件">
               <span class="video-thumb-icon">🎥</span>
@@ -546,26 +534,20 @@
                   class="video-poster-thumb"
                 />
                 <template v-else-if="shouldRenderCardVideoPreview(item, index)">
-                  <div class="video-preview-shell" :class="{ loaded: isCardVideoLoaded(item.id), errored: isCardVideoErrored(item.id) }">
-                    <img
-                      class="video-preview-poster"
-                      :src="getCardVideoPosterSrc(item)"
-                      :alt="item.fileName"
-                    />
-                    <video
-                      v-if="!isCardVideoErrored(item.id)"
-                      class="video-preview-layer"
-                      :src="getCardVideoPreviewSrc(item)"
-                      preload="metadata"
-                      playsinline
-                      muted
-                      @loadeddata="() => onCardVideoLoaded(item.id)"
-                      @error="() => onCardVideoError(item.id)"
-                    ></video>
-                    <div class="video-preview-badge">
-                      <span class="video-preview-badge-icon">▶</span>
-                    </div>
-                  </div>
+                  <video
+                    v-if="!isCardVideoErrored(item.id)"
+                    class="video-preview-shell"
+                    :src="getCardVideoPreviewSrc(item)"
+                    :poster="getCardVideoPosterSrc(item)"
+                    autoplay
+                    loop
+                    muted
+                    playsinline
+                    preload="auto"
+                    @loadeddata="(event) => handleCardVideoLoaded(event, item.id)"
+                    @error="() => onCardVideoError(item.id)"
+                  ></video>
+                  <img v-else :src="getCardVideoPosterSrc(item)" :alt="item.fileName" class="video-poster-thumb" />
                 </template>
                 <div v-else class="video-thumb-placeholder" aria-label="视频文件">
                   <span class="video-thumb-icon">🎥</span>
@@ -1037,6 +1019,13 @@ const onCardVideoLoaded = (itemId: string) => {
   const next = new Set(cardVideoPreviewLoadedIds.value)
   next.add(itemId)
   cardVideoPreviewLoadedIds.value = next
+}
+
+const handleCardVideoLoaded = (event: Event, itemId: string) => {
+  onCardVideoLoaded(itemId)
+  const video = event.target as HTMLVideoElement | null
+  if (!video) return
+  void video.play().catch(() => {})
 }
 
 const onCardVideoError = (itemId: string) => {
@@ -3051,68 +3040,6 @@ const selectAllInSubfolder = () => {
   object-fit: cover;
 }
 
-.video-preview-shell {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: linear-gradient(135deg, #e9eef6 0%, #dbe4ef 100%);
-}
-
-.video-preview-poster,
-.video-preview-layer {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.video-preview-poster {
-  filter: saturate(0.92) brightness(0.97);
-  transform: scale(1.01);
-}
-
-.video-preview-layer {
-  opacity: 0;
-  transition: opacity 0.18s ease;
-}
-
-.video-preview-shell.loaded .video-preview-layer {
-  opacity: 1;
-}
-
-.video-preview-shell.loaded .video-preview-poster {
-  opacity: 0;
-}
-
-.video-preview-shell.errored .video-preview-layer {
-  display: none;
-}
-
-.video-preview-badge {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-
-.video-preview-badge-icon {
-  width: 68px;
-  height: 68px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  color: #5b6677;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 28px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
-  backdrop-filter: blur(4px);
-}
-
 .video-thumb-placeholder {
   width: 100%;
   height: 100%;
@@ -4791,10 +4718,6 @@ const selectAllInSubfolder = () => {
   height: 100%;
   object-fit: cover;
   opacity: 0.7;
-}
-
-.trash-thumbnail .video-preview-shell {
-  opacity: 0.85;
 }
 
 .trash-thumbnail .video-thumb-placeholder {
