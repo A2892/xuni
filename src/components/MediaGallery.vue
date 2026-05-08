@@ -281,13 +281,19 @@
                 :alt="item.fileName"
                 class="video-poster-thumb"
               />
-              <video
-                v-else-if="shouldRenderCardVideoPreview(item, index)"
-                :src="getCardVideoPreviewSrc(item)"
-                preload="metadata"
-                playsinline
-                muted
-              ></video>
+              <template v-else-if="shouldRenderCardVideoPreview(item, index)">
+                <video
+                  v-if="!isCardVideoErrored(item.id)"
+                  :src="getCardVideoPreviewSrc(item)"
+                  :poster="item.thumbnail || '/media-placeholder.svg'"
+                  preload="metadata"
+                  playsinline
+                  muted
+                  @loadeddata="() => onCardVideoLoaded(item.id)"
+                  @error="() => onCardVideoError(item.id)"
+                ></video>
+                <img v-else :src="'/media-placeholder.svg'" alt="占位图" class="video-poster-thumb" />
+              </template>
               <div v-else class="video-thumb-placeholder" aria-label="视频文件">
                 <span class="video-thumb-icon">🎥</span>
               </div>
@@ -347,13 +353,19 @@
               :alt="deleted.item.fileName"
               class="video-poster-thumb"
             />
-            <video
-              v-else-if="shouldRenderCardVideoPreview(deleted.item, index)"
-              :src="getCardVideoPreviewSrc(deleted.item)"
-              preload="metadata"
-              playsinline
-              muted
-            ></video>
+            <template v-else-if="shouldRenderCardVideoPreview(deleted.item, index)">
+              <video
+                v-if="!isCardVideoErrored(deleted.item.id)"
+                :src="getCardVideoPreviewSrc(deleted.item)"
+                :poster="deleted.item.thumbnail || '/media-placeholder.svg'"
+                preload="metadata"
+                playsinline
+                muted
+                @loadeddata="() => onCardVideoLoaded(deleted.item.id)"
+                @error="() => onCardVideoError(deleted.item.id)"
+              ></video>
+              <img v-else :src="'/media-placeholder.svg'" alt="占位图" class="video-poster-thumb" />
+            </template>
             <div v-else class="video-thumb-placeholder" aria-label="视频文件">
               <span class="video-thumb-icon">🎥</span>
             </div>
@@ -515,13 +527,19 @@
                   :alt="item.fileName"
                   class="video-poster-thumb"
                 />
-                <video
-                  v-else-if="shouldRenderCardVideoPreview(item, index)"
-                  :src="getCardVideoPreviewSrc(item)"
-                  preload="metadata"
-                  playsinline
-                  muted
-                ></video>
+                <template v-else-if="shouldRenderCardVideoPreview(item, index)">
+                  <video
+                    v-if="!isCardVideoErrored(item.id)"
+                    :src="getCardVideoPreviewSrc(item)"
+                    :poster="item.thumbnail || '/media-placeholder.svg'"
+                    preload="metadata"
+                    playsinline
+                    muted
+                    @loadeddata="() => onCardVideoLoaded(item.id)"
+                    @error="() => onCardVideoError(item.id)"
+                  ></video>
+                  <img v-else :src="'/media-placeholder.svg'" alt="占位图" class="video-poster-thumb" />
+                </template>
                 <div v-else class="video-thumb-placeholder" aria-label="视频文件">
                   <span class="video-thumb-icon">🎥</span>
                 </div>
@@ -976,6 +994,8 @@ const videoSizeMode = ref<'fit' | 'original'>('fit')
 // 回收站相关
 const showTrashView = ref(false)
 const cardVideoPreviewEnabledIds = ref(new Set<string>())
+const cardVideoPreviewLoadedIds = ref(new Set<string>())
+const cardVideoPreviewErrorIds = ref(new Set<string>())
 
 const enableCardVideoPreview = (itemId: string) => {
   if (!itemId) return
@@ -983,6 +1003,20 @@ const enableCardVideoPreview = (itemId: string) => {
   const next = new Set(cardVideoPreviewEnabledIds.value)
   next.add(itemId)
   cardVideoPreviewEnabledIds.value = next
+}
+
+const onCardVideoLoaded = (itemId: string) => {
+  if (!itemId) return
+  const next = new Set(cardVideoPreviewLoadedIds.value)
+  next.add(itemId)
+  cardVideoPreviewLoadedIds.value = next
+}
+
+const onCardVideoError = (itemId: string) => {
+  if (!itemId) return
+  const next = new Set(cardVideoPreviewErrorIds.value)
+  next.add(itemId)
+  cardVideoPreviewErrorIds.value = next
 }
 
 const shouldRenderCardVideoPreview = (item: MediaItem, index: number): boolean => {
@@ -997,6 +1031,14 @@ const getCardVideoPreviewSrc = (item: MediaItem): string => {
   if (!raw) return ''
   if (raw.includes('#t=')) return raw
   return `${raw}#t=0.1`
+}
+
+const isCardVideoErrored = (itemId: string) => {
+  return cardVideoPreviewErrorIds.value.has(itemId)
+}
+
+const isCardVideoLoaded = (itemId: string) => {
+  return cardVideoPreviewLoadedIds.value.has(itemId)
 }
 
 // 页面可见性变化时刷新数据
