@@ -166,8 +166,34 @@ function buildR2StreamUrl(objectKey: string): string {
   return `${API_BASE_URL}/api/r2/stream?objectKey=${encodeURIComponent(key)}`
 }
 
+function normalizeLegacyApiUrl(rawUrl: string): string {
+  const text = String(rawUrl || '').trim()
+  if (!text) return ''
+  if (!/^https?:\/\//i.test(text)) return text
+
+  try {
+    const url = new URL(text)
+    const hostname = String(url.hostname || '').toLowerCase()
+    const isLegacyLocal = hostname === 'localhost' || hostname === '127.0.0.1'
+    if (!isLegacyLocal) return text
+    if (!url.pathname.startsWith('/api/')) return text
+
+    const base = String(API_BASE_URL || '').replace(/\/+$/, '')
+    return `${base}${url.pathname}${url.search || ''}`
+  } catch {
+    return text
+  }
+}
+
+function buildCockroachStorageFileUrl(storagePath: string): string {
+  const path = String(storagePath || '').trim()
+  if (!path) return ''
+  const base = String(API_BASE_URL || '').replace(/\/+$/, '')
+  return `${base}/api/storage/student-media/file?path=${encodeURIComponent(path)}`
+}
+
 export function resolveFastVideoUrl(item: any): string {
-  const currentUrl = String(item?.url || '').trim()
+  const currentUrl = normalizeLegacyApiUrl(String(item?.url || '').trim())
   const rawStoragePath = String(item?.storage_path || item?.storagePath || '').trim()
 
   if (currentUrl.includes('/api/r2/stream?objectKey=')) {
@@ -278,17 +304,24 @@ function buildCloudinaryImageUrl(publicId: string): string {
 
 function resolvePreferredPhotoUrl(record: any): string {
   const refs = resolvePhotoReplicaRefs(record?.storage_path)
-  if (refs.cockroachPath && supabase) {
-    const { data } = supabase.storage.from('student-media').getPublicUrl(refs.cockroachPath)
-    if (data?.publicUrl) return data.publicUrl
-  }
-
-  if (record?.url) return String(record.url)
 
   if (refs.cloudinaryPublicId) {
     const cloudinaryUrl = buildCloudinaryImageUrl(refs.cloudinaryPublicId)
     if (cloudinaryUrl) return cloudinaryUrl
   }
+
+  if (refs.cockroachPath && useCockroachApi) {
+    const cockroachUrl = buildCockroachStorageFileUrl(refs.cockroachPath)
+    if (cockroachUrl) return cockroachUrl
+  }
+
+  if (refs.cockroachPath && supabase) {
+    const { data } = supabase.storage.from('student-media').getPublicUrl(refs.cockroachPath)
+    if (data?.publicUrl) return data.publicUrl
+  }
+
+  const normalizedRecordUrl = normalizeLegacyApiUrl(String(record?.url || '').trim())
+  if (normalizedRecordUrl) return normalizedRecordUrl
 
   return ''
 }
@@ -674,7 +707,7 @@ async function deleteR2Object(objectKey: string): Promise<void> {
 
 export async function resolvePlayableVideoUrl(item: MediaItem | any): Promise<string> {
   const mediaType = String(item?.type || '').toLowerCase()
-  const currentUrl = String(item?.url || '').trim()
+  const currentUrl = normalizeLegacyApiUrl(String(item?.url || '').trim())
   if (mediaType !== 'video') {
     return currentUrl
   }
