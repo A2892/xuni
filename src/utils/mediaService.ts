@@ -12,6 +12,10 @@ const useCloudinaryDirectUpload = Boolean(CLOUDINARY_CLOUD_NAME && CLOUDINARY_UP
 const R2_PRESIGN_RETRY_COUNT = Math.max(1, Number(import.meta.env.VITE_R2_PRESIGN_RETRY_COUNT || 3))
 const R2_UPLOAD_RETRY_COUNT = Math.max(1, Number(import.meta.env.VITE_R2_UPLOAD_RETRY_COUNT || 3))
 const R2_UPLOAD_TIMEOUT_MS = Math.max(60_000, Number(import.meta.env.VITE_R2_UPLOAD_TIMEOUT_MS || 30 * 60 * 1000))
+const VIDEO_THUMBNAIL_MAX_WIDTH = 1280
+const VIDEO_THUMBNAIL_MAX_HEIGHT = 720
+const VIDEO_THUMBNAIL_JPEG_QUALITY = 0.9
+const VIDEO_THUMBNAIL_SEEK_SECONDS = 0.1
 import type { MediaItem } from '@/types/media'
 import { getAllStudentProfiles } from './studentProfileService'
 import type { StudentProfile } from '@/types/student'
@@ -113,6 +117,74 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function buildVideoThumbnailFileName(fileName: string): string {
+  const base = String(fileName || '').replace(/\.[^/.]+$/, '').trim() || 'video'
+  const safeBase = base.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 48)
+  return `${safeBase}_thumb_${Date.now()}.jpg`
+}
+
+async function generateVideoThumbnailBlob(file: File): Promise<Blob | null> {
+  if (typeof document === 'undefined' || !file || !file.type.startsWith('video/')) return null
+
+  const objectUrl = URL.createObjectURL(file)
+  const video = document.createElement('video')
+  video.preload = 'metadata'
+  video.muted = true
+  video.playsInline = true
+  video.src = objectUrl
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onError = () => reject(new Error('视频元数据加载失败'))
+      video.addEventListener('loadedmetadata', () => resolve(), { once: true })
+      video.addEventListener('error', onError, { once: true })
+    })
+
+    const duration = Number.isFinite(video.duration) ? video.duration : 0
+    const safeSeek = Math.max(0, duration - 0.1)
+    const seekTime = Math.min(VIDEO_THUMBNAIL_SEEK_SECONDS, safeSeek)
+
+    if (seekTime > 0) {
+      video.currentTime = seekTime
+      await new Promise<void>((resolve, reject) => {
+        const onError = () => reject(new Error('视频定位失败'))
+        video.addEventListener('seeked', () => resolve(), { once: true })
+        video.addEventListener('error', onError, { once: true })
+      })
+    } else if (video.readyState < 2) {
+      await new Promise<void>((resolve) => {
+        video.addEventListener('loadeddata', () => resolve(), { once: true })
+      })
+    }
+
+    const sourceWidth = video.videoWidth || 0
+    const sourceHeight = video.videoHeight || 0
+    if (!sourceWidth || !sourceHeight) return null
+
+    const scale = Math.min(
+      1,
+      VIDEO_THUMBNAIL_MAX_WIDTH / sourceWidth,
+      VIDEO_THUMBNAIL_MAX_HEIGHT / sourceHeight
+    )
+    const targetWidth = Math.max(1, Math.round(sourceWidth * scale))
+    const targetHeight = Math.max(1, Math.round(sourceHeight * scale))
+
+    const canvas = document.createElement('canvas')
+    canvas.width = targetWidth
+    canvas.height = targetHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+
+    ctx.drawImage(video, 0, 0, targetWidth, targetHeight)
+
+    return await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', VIDEO_THUMBNAIL_JPEG_QUALITY)
+    })
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
 function normalizePotentialR2ObjectKey(input: string): string {
   let key = String(input || '').trim()
   if (!key) return ''
@@ -196,16 +268,7 @@ export function resolveFastVideoUrl(item: any): string {
   const currentUrl = normalizeLegacyApiUrl(String(item?.url || '').trim())
   const rawStoragePath = String(item?.storage_path || item?.storagePath || '').trim()
 
-  if (currentUrl.includes('r2.cloudflarestorage.com/')) {
-    const keyFromUrl = extractR2ObjectKeyFromUrl(currentUrl)
-    if (keyFromUrl) {
-      const streamUrl = buildR2StreamUrl(keyFromUrl)
-      if (streamUrl) return streamUrl
-    }
-    return currentUrl
-  }
-
-  if (currentUrl.includes('/api/r2/stream?objectKey=')) {
+  if (currentUrl && !currentUrl.includes('/api/r2/stream?objectKey=')) {
     return currentUrl
   }
 
@@ -687,7 +750,7 @@ async function uploadToR2Direct(
       return {
         url: publicUrl,
         storagePath: `r2:${normalizePotentialR2ObjectKey(objectKey)}`,
-        thumbnailUrl: null
+        thumbnailUrl: mediaType === 'photo' ? publicUrl : null
       }
     } catch (error: any) {
       uploadLastError = error instanceof Error ? error : new Error(String(error || 'R2 上传失败'))
@@ -872,6 +935,21 @@ export async function uploadMediaFile(
       thumbnailUrl = directUpload.thumbnailUrl
       uploadCleanupStoragePath = storagePath
       console.log('R2 上传成功:', storagePath)
+
+      if (!thumbnailUrl) {
+        try {
+          const thumbBlob = await generateVideoThumbnailBlob(file)
+          if (thumbBlob) {
+            const thumbFile = new File([thumbBlob], buildVideoThumbnailFileName(file.name), {
+              type: 'image/jpeg'
+            })
+            const thumbUpload = await uploadToR2Direct(thumbFile, 'photo')
+            thumbnailUrl = thumbUpload.url || thumbUpload.thumbnailUrl
+          }
+        } catch (thumbError) {
+          console.warn('生成视频缩略图失败:', thumbError)
+        }
+      }
     } else if (shouldUseCloudinaryDirectUpload) {
       if (!useCloudinaryDirectUpload) {
         throw new Error('Cloudinary 直传未配置：请设置 VITE_CLOUDINARY_CLOUD_NAME 和 VITE_CLOUDINARY_UPLOAD_PRESET')

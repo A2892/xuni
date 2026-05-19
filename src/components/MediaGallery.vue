@@ -273,7 +273,7 @@
             <div class="select-checkbox" @click.stop="toggleSelectItem(item.id)">
               <input type="checkbox" :checked="selectedItems.includes(item.id)" />
             </div>
-            <div class="media-thumbnail" @click.stop="selectMedia(item)" @mouseenter="enableCardVideoPreview(item.id)">
+            <div class="media-thumbnail" @click.stop="selectMedia(item)">
               <img v-if="item.type === 'photo'" :src="item.url" :alt="item.fileName" />
               <img
                 v-else-if="item.type === 'photo' && item.thumbnail"
@@ -281,23 +281,12 @@
                 :alt="item.fileName"
                 class="video-poster-thumb"
               />
-              <template v-else-if="item.type === 'video'">
-                <video
-                  v-if="!isCardVideoErrored(item.id)"
-                  class="video-preview-shell"
-                  :src="getCardVideoPreviewSrc(item)"
-                  :poster="getCardVideoPosterSrc(item)"
-                  autoplay
-                  loop
-                  muted
-                  playsinline
-                  preload="auto"
-                  crossorigin="anonymous"
-                  @loadeddata="(event) => handleCardVideoLoaded(event, item.id)"
-                  @error="() => onCardVideoError(item.id)"
-                ></video>
-                <img v-else :src="getCardVideoPosterSrc(item)" :alt="item.fileName" class="video-poster-thumb" />
-              </template>
+              <img
+                v-else-if="item.type === 'video'"
+                :src="getCardVideoPosterSrc(item)"
+                :alt="item.fileName"
+                class="video-poster-thumb"
+              />
               <div v-else class="video-thumb-placeholder" aria-label="视频文件">
                 <span class="video-thumb-icon">🎥</span>
               </div>
@@ -349,7 +338,7 @@
           :key="deleted.item.id"
           class="trash-card"
         >
-          <div class="trash-thumbnail" @mouseenter="enableCardVideoPreview(deleted.item.id)">
+          <div class="trash-thumbnail">
             <img v-if="deleted.item.type === 'photo'" :src="deleted.item.url" :alt="deleted.item.fileName" />
             <img
               v-else-if="deleted.item.type === 'photo' && deleted.item.thumbnail"
@@ -357,23 +346,12 @@
               :alt="deleted.item.fileName"
               class="video-poster-thumb"
             />
-            <template v-else-if="deleted.item.type === 'video'">
-              <video
-                v-if="!isCardVideoErrored(deleted.item.id)"
-                class="video-preview-shell"
-                  :src="getCardVideoPreviewSrc(deleted.item)"
-                :poster="getCardVideoPosterSrc(deleted.item)"
-                autoplay
-                loop
-                muted
-                playsinline
-                preload="auto"
-                  crossorigin="anonymous"
-                @loadeddata="(event) => handleCardVideoLoaded(event, deleted.item.id)"
-                @error="() => onCardVideoError(deleted.item.id)"
-              ></video>
-              <img v-else :src="getCardVideoPosterSrc(deleted.item)" :alt="deleted.item.fileName" class="video-poster-thumb" />
-            </template>
+            <img
+              v-else-if="deleted.item.type === 'video'"
+              :src="getCardVideoPosterSrc(deleted.item)"
+              :alt="deleted.item.fileName"
+              class="video-poster-thumb"
+            />
             <div v-else class="video-thumb-placeholder" aria-label="视频文件">
               <span class="video-thumb-icon">🎥</span>
             </div>
@@ -527,7 +505,7 @@
               <div class="select-checkbox" @click.stop="toggleSelectItem(item.id)">
                 <input type="checkbox" :checked="selectedItems.includes(item.id)" />
               </div>
-              <div class="media-thumbnail" @click.stop="selectMedia(item)" @mouseenter="enableCardVideoPreview(item.id)">
+              <div class="media-thumbnail" @click.stop="selectMedia(item)">
                 <img v-if="item.type === 'photo'" :src="item.url" :alt="item.fileName" />
                 <img
                   v-else-if="item.type === 'photo' && item.thumbnail"
@@ -535,23 +513,12 @@
                   :alt="item.fileName"
                   class="video-poster-thumb"
                 />
-                <template v-else-if="item.type === 'video'">
-                  <video
-                    v-if="!isCardVideoErrored(item.id)"
-                    class="video-preview-shell"
-                    :src="getCardVideoPreviewSrc(item)"
-                    :poster="getCardVideoPosterSrc(item)"
-                    autoplay
-                    loop
-                    muted
-                    playsinline
-                    preload="auto"
-                    crossorigin="anonymous"
-                    @loadeddata="(event) => handleCardVideoLoaded(event, item.id)"
-                    @error="() => onCardVideoError(item.id)"
-                  ></video>
-                  <img v-else :src="getCardVideoPosterSrc(item)" :alt="item.fileName" class="video-poster-thumb" />
-                </template>
+                <img
+                  v-else-if="item.type === 'video'"
+                  :src="getCardVideoPosterSrc(item)"
+                  :alt="item.fileName"
+                  class="video-poster-thumb"
+                />
                 <div v-else class="video-thumb-placeholder" aria-label="视频文件">
                   <span class="video-thumb-icon">🎥</span>
                 </div>
@@ -1005,59 +972,11 @@ const videoSizeMode = ref<'fit' | 'original'>('fit')
 
 // 回收站相关
 const showTrashView = ref(false)
-const cardVideoPreviewEnabledIds = ref(new Set<string>())
-const cardVideoPreviewLoadedIds = ref(new Set<string>())
-const cardVideoPreviewErrorIds = ref(new Set<string>())
-
-const enableCardVideoPreview = (itemId: string) => {
-  if (!itemId) return
-  if (cardVideoPreviewEnabledIds.value.has(itemId)) return
-  const next = new Set(cardVideoPreviewEnabledIds.value)
-  next.add(itemId)
-  cardVideoPreviewEnabledIds.value = next
-}
-
-const onCardVideoLoaded = (itemId: string) => {
-  if (!itemId) return
-  const next = new Set(cardVideoPreviewLoadedIds.value)
-  next.add(itemId)
-  cardVideoPreviewLoadedIds.value = next
-}
-
-const handleCardVideoLoaded = (event: Event, itemId: string) => {
-  onCardVideoLoaded(itemId)
-  const video = event.target as HTMLVideoElement | null
-  if (!video) return
-  void video.play().catch(() => {})
-}
-
-const onCardVideoError = (itemId: string) => {
-  if (!itemId) return
-  const next = new Set(cardVideoPreviewErrorIds.value)
-  next.add(itemId)
-  cardVideoPreviewErrorIds.value = next
-}
-
-const shouldRenderCardVideoPreview = (item: MediaItem, index: number): boolean => {
-  return !!item && item.type === 'video'
-}
-
-const getCardVideoPreviewSrc = (item: MediaItem): string => {
-  return resolveFastVideoUrl(item as any)
-}
 
 const getCardVideoPosterSrc = (item: MediaItem): string => {
   const thumbnail = String(item?.thumbnail || '').trim()
   if (thumbnail) return thumbnail
   return '/media-placeholder.svg'
-}
-
-const isCardVideoErrored = (itemId: string) => {
-  return cardVideoPreviewErrorIds.value.has(itemId)
-}
-
-const isCardVideoLoaded = (itemId: string) => {
-  return cardVideoPreviewLoadedIds.value.has(itemId)
 }
 
 // 页面可见性变化时刷新数据
